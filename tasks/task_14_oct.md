@@ -28,3 +28,40 @@ Author: Nitish
 - Real mouse/keyboard automation is blocked: Computer Use native pipe failed twice with OS error 2. Pointer/keyboard flows, clipboard paste, Save as and overwrite dialogs require manual verification.
 - Mixed-DPI/negative-monitor/disconnect/HDR hardware and release performance remain unverified. Opaque-black DRM output is not reliably detectable; documented in README.
 - No release build, branch, push or deployment.
+
+## Screenshot workflow corrections completed
+
+- Replaced the narrow first-release shelf with the supplied reference's 540x740 layout: All/Captures/Exports, list/grid, search, pastel tabbed folders and an anchored capture/folder dock. Follows the system light/dark preference; refined native scrollbar styling and light-theme hover/switch tokens.
+- Organizational folder create/rename/delete, counts, filtered history, per-capture move and a persisted destination for new captures. Folder removal preserves images. Atomic combined index migrates the legacy flat history without moving originals.
+- Added a native Windows directory picker for automatic PNG copies, explicit storage path in Settings, opening the destination and turning auto-save off. Exclusive unique filenames avoid replacing existing files. A missing output directory reports an error while preserving the committed library capture. Export copies survive library deletion.
+- Separate native owner-modal image viewer with previous/next across paginated filtered history, fit/1:1/zoom, pointer pan, wheel/keyboard controls, folder assignment, Copy, Save as and confirmed Delete. Native parent disable/enable, focus restoration and capture/viewer exclusion protect modal lifetime.
+- Custom capture/folder right-click menus, Menu key/Shift+F10, keyboard submenu navigation, viewport clamping, focus restoration, dialog focus containment and suppression of the browser page menu. Editable inputs retain text menus.
+- Persisted Instant capture toggle and selected type. Instant runs the action directly; normal mode asks for the type and enables window picking. Native foreground-event tracking remembers the external active window before shelf activation. Captured thumbnails animate into the shelf after decode; reduced motion skips flight.
+- Type checking passed; screenshot frontend tests 22 passed (27 with the concurrent updater tests); Rust tests 12 passed; Clippy with warnings denied passed. Added migration/folder/export failure tests and viewer transform/deep-pagination tests.
+- Focused native diagnostic passed: screen/direct-region capture, direct previous-active window after shelf activation without a picker, unique auto-saved PNGs, folder/filter persistence, owner-modal lifetime and capture exclusion, and retained capture on simulated unavailable output directory. Actual native shelf/context-menu/viewer screenshots inspected. Evidence: verification/screenshot-update-final/native-results.txt and PNGs. First attempt lacked a running Vite server and timed out; fresh runs after restarting it passed.
+- New diagnostic output is gitignored because captures can contain desktop content. The older resource sample predates the larger shelf/viewer; no new performance claim is made. Real input, native directory/Save dialogs, clipboard paste, mixed-DPI/HDR and release packaging remain manual/unverified.
+- Added npm run package:windows for the configured x64 NSIS installer. README documents signing configuration and output path. No installer/release build was generated, following the standing no-release-build instruction. Video remains deferred by Nitish's explicit screenshots-first choice.
+# GitHub Windows releases and in-app updates
+
+- Matched FB_rea's main/master push release flow for Tauri: automatic versions across npm/Tauri/Cargo and lockfiles, Windows x64 NSIS packaging, generated release notes, signed updater assets, and draft validation before publication.
+- Added installed-app checks after 10 seconds and every six hours, shelf notice, Settings check/download/progress/notes/restart controls, retryable errors, signature verification, and capture/viewer/persistence protection during install. Development does not fetch updates.
+- Created the signing key outside the checkout at `C:\Users\Admin\.tauri\captrain.key` and configured the matching `TAURI_SIGNING_PRIVATE_KEY` GitHub repository secret. Updated design and release/setup documentation.
+- Verification: TypeScript passed; all 27 current Vitest checks passed, including five update lifecycle checks. Three Node release-file checks passed for LF/CRLF synchronization and rejecting inconsistent versions before writing; automatic-version assertions passed. Rust updater API and Tauri action inputs were checked against their sources; no native compilation, release build, installer/update execution, push or deployment was performed. Windows Authenticode is not configured.
+
+## App branding
+
+- Created a canonical SVG mark matching the existing muted-blue, warm-white, rounded utility style: C-shaped capture frame with a saved-image tile.
+- Applied it to the shelf's Show everything button, Settings wordmark, favicon, native tray and Windows bundle icons. The tray now uses the shared generated PNG instead of a separately drawn symbol. Kept the name, application identifier, storage paths and existing interactions.
+- Updated design.md and generated only the retained Windows assets with the installed Tauri icon tool; no new dependencies.
+- Verification: TypeScript passed; the design detector returned no findings. Inspected the rendered icon; asserted PNG dimensions (32, 128 and 256 pixels) and validated the six-size ICO header. No builds, native runtime checks, branches, pushes or deployment. To verify packaging locally, run `npm run package:windows`.
+
+### Branding reference correction
+
+- Replaced the initial capture-frame mark with Nitish's requested rounded cube silhouette and a bold perspective C on its right face. Used the existing muted blue and warm white, with a transparent background.
+- Regenerated all retained Windows icons from the shared SVG, automatically updating the existing shelf, Settings, favicon and native tray consumers. Updated the brand specification in design.md.
+- Verification: visually inspected 128px and 32px renders; PNG dimensions and the multi-size ICO header passed. No builds or native runtime checks; existing native binaries need rebuilding to show the updated embedded icons.
+
+### Approved C icon
+
+- Replaced only the shared SVG and generated Windows icon assets with vector contours following Nitish's final C image, including its soft rounded letter terminals. Retained the app's blue/warm-white colors and a transparent background; no additional UI changes.
+- Updated the brand description. Inspected the generated render and checked PNG dimensions. No builds or native runtime checks.

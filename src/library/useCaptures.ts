@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { native, type LibraryPage } from '../native';
 import { errorMessage } from '../util';
+import { loadRange } from './paging';
 
 const EMPTY: LibraryPage = { items: [], total: 0 };
 
@@ -9,7 +10,7 @@ const EMPTY: LibraryPage = { items: [], total: 0 };
  * Re-runs on any argument change; superseded requests are ignored and thumbnails
  * for items that left the page are dropped.
  */
-export function useCaptures(query: string, offset: number, limit: number, rev: number, onSettled?: () => void) {
+export function useCaptures(query: string, offset: number, limit: number, rev: number, onSettled?: () => void, folderId: string | null = null, exportedOnly = false) {
   const [page, setPage] = useState<LibraryPage>(EMPTY);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
@@ -22,7 +23,7 @@ export function useCaptures(query: string, offset: number, limit: number, rev: n
     let live = true;
     (async () => {
       try {
-        const next = await native.list(query, offset, limit);
+        const next = await loadRange((o, l) => native.list(query, o, l, folderId, exportedOnly), limit, offset);
         if (!live) return;
         const keep: Record<string, string> = {};
         for (const item of next.items) if (cache.current[item.id]) keep[item.id] = cache.current[item.id];
@@ -49,7 +50,7 @@ export function useCaptures(query: string, offset: number, limit: number, rev: n
       }
     })();
     return () => { live = false; };
-  }, [query, offset, limit, rev]);
+  }, [query, offset, limit, rev, folderId, exportedOnly]);
 
   return { ...page, thumbs, loaded, error };
 }

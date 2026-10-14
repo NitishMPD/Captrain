@@ -13,16 +13,35 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut};
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub edge: String,
     pub display: Option<String>,
     pub shortcuts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub capture_folder: Option<std::path::PathBuf>,
+    #[serde(default = "instant_default")]
+    pub instant_capture: bool,
+    #[serde(default = "kind_default")]
+    pub capture_kind: crate::library::Kind,
+    #[serde(default)]
+    pub active_folder: Option<String>,
+}
+fn instant_default() -> bool {
+    true
+}
+fn kind_default() -> crate::library::Kind {
+    crate::library::Kind::Region
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
             edge: "right".into(),
             display: None,
+            capture_folder: None,
+            instant_capture: true,
+            capture_kind: crate::library::Kind::Region,
+            active_folder: None,
             shortcuts: [
                 ("region", "Ctrl+Alt+1"),
                 ("window", "Ctrl+Alt+2"),
@@ -121,6 +140,22 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
         }
     }
     let state = app.state::<Arc<AppState>>();
+    {
+        let library = state.library.lock().unwrap();
+        library.validate_folder(next.active_folder.as_deref())?;
+        if let Some(folder) = &next.capture_folder {
+            if !folder.is_absolute() || !folder.is_dir() {
+                return Err("Choose an existing absolute save folder.".into());
+            }
+            if folder
+                .canonicalize()
+                .map_err(err)?
+                .starts_with(library.root.canonicalize().map_err(err)?)
+            {
+                return Err("Choose a save folder outside Captrain's private library.".into());
+            }
+        }
+    }
     let mut settings = state.settings.lock().unwrap();
     if !settings.writable {
         return Err(settings
@@ -170,6 +205,24 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn previous_settings_gain_capture_defaults() {
+        let mut json = serde_json::to_value(Settings::default()).unwrap();
+        for field in [
+            "captureFolder",
+            "instantCapture",
+            "captureKind",
+            "activeFolder",
+        ] {
+            json.as_object_mut().unwrap().remove(field);
+        }
+        let loaded: Settings = serde_json::from_value(json).unwrap();
+        assert!(loaded.instant_capture);
+        assert_eq!(loaded.capture_kind, crate::library::Kind::Region);
+        assert!(loaded.capture_folder.is_none());
+        assert!(loaded.active_folder.is_none());
+        assert!(validate(&loaded).is_ok());
+    }
     #[test]
     fn validates_duplicates_modifiers_and_actions() {
         let mut s = Settings::default();

@@ -1,7 +1,10 @@
 mod capture;
+mod desktop;
+mod foreground;
 mod library;
 mod shelf_window;
 mod shortcuts;
+mod updates;
 #[cfg(debug_assertions)]
 mod verification;
 
@@ -19,6 +22,7 @@ pub struct AppState {
     cancelled: AtomicBool,
     recording: AtomicBool,
     pending: Mutex<Option<capture::Pending>>,
+    viewer: Mutex<Option<desktop::ViewerContext>>,
 }
 fn shelf_only(window: &WebviewWindow) -> Result<()> {
     if window.label() == "shelf" {
@@ -54,9 +58,14 @@ fn shelf_action(
     shelf_window::action_for(&app, &action, reveal)
 }
 #[tauri::command]
-fn start_capture(window: WebviewWindow, app: AppHandle, kind: Kind) -> Result<()> {
+fn start_capture(
+    window: WebviewWindow,
+    app: AppHandle,
+    kind: Kind,
+    direct: Option<bool>,
+) -> Result<()> {
     shelf_only(&window)?;
-    capture::start(&app, kind)
+    capture::start_with(&app, kind, direct.unwrap_or(false))
 }
 #[tauri::command]
 async fn list_captures(
@@ -65,11 +74,19 @@ async fn list_captures(
     query: String,
     offset: usize,
     limit: usize,
+    folder_id: Option<String>,
+    exported_only: Option<bool>,
 ) -> Result<library::Page> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(state.library.lock().unwrap().list(&query, offset, limit))
+        Ok(state.library.lock().unwrap().list_filtered(
+            &query,
+            offset,
+            limit,
+            folder_id.as_deref(),
+            exported_only.unwrap_or(false),
+        ))
     })
     .await
     .map_err(err)?
@@ -81,7 +98,7 @@ async fn capture_image(
     id: String,
     thumbnail: bool,
 ) -> Result<String> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         state.library.lock().unwrap().image(&id, thumbnail)
@@ -95,7 +112,7 @@ async fn copy_capture(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<()> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || state.library.lock().unwrap().copy(&id))
         .await
@@ -104,14 +121,17 @@ async fn copy_capture(
 #[tauri::command]
 async fn delete_capture(
     window: WebviewWindow,
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<()> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || state.library.lock().unwrap().delete(&id))
         .await
-        .map_err(err)?
+        .map_err(err)??;
+    desktop::changed(&app);
+    Ok(())
 }
 #[tauri::command]
 async fn save_capture(
@@ -120,7 +140,7 @@ async fn save_capture(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<bool> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     let state = state.inner().clone();
     let (source, name) = state.library.lock().unwrap().export_source(&id)?;
     shelf_window::action(&app, "hold")?;
@@ -151,9 +171,22 @@ async fn save_capture(
     if parent.starts_with(&root) {
         return Err("Choose an export location outside Captrain's private library.".into());
     }
+    let app2 = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let bytes = std::fs::read(source).map_err(err)?;
         library::atomic_write(&destination, &bytes)?;
+        state
+            .library
+            .lock()
+            .unwrap()
+            .mark_exported(&id, destination.clone())
+            .map_err(|e| {
+                format!(
+                    "Image saved at {}, but export history could not update: {e}",
+                    destination.display()
+                )
+            })?;
+        desktop::changed(&app2);
         Ok(true)
     })
     .await
@@ -255,6 +288,8 @@ fn record_shortcuts(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let _ = shelf_window::action(app, "open");
         }))
@@ -267,6 +302,9 @@ pub fn run() {
                     let Some(state) = app.try_state::<Arc<AppState>>() else {
                         return;
                     };
+                    if state.viewer.lock().unwrap().is_some() {
+                        return;
+                    }
                     let action = {
                         let settings = state.settings.lock().unwrap();
                         settings
@@ -290,7 +328,10 @@ pub fn run() {
                     let result = match action.as_deref() {
                         Some("toggle") => shelf_window::action(app, "toggle"),
                         Some("region") => capture::start(app, Kind::Region),
-                        Some("window") => capture::start(app, Kind::Window),
+                        Some("window") => {
+                            let direct = state.settings.lock().unwrap().value.instant_capture;
+                            capture::start_with(app, Kind::Window, direct)
+                        }
                         Some("screen") => capture::start(app, Kind::Screen),
                         _ => Ok(()),
                     };
@@ -309,6 +350,9 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            updates::check_update,
+            updates::download_update,
+            updates::install_update,
             shelf_state,
             shelf_action,
             start_capture,
@@ -324,7 +368,18 @@ pub fn run() {
             overlay_data,
             finish_selection,
             cancel_capture,
-            record_shortcuts
+            record_shortcuts,
+            desktop::list_folders,
+            desktop::create_folder,
+            desktop::rename_folder,
+            desktop::delete_folder,
+            desktop::move_capture,
+            desktop::choose_capture_folder,
+            desktop::open_capture_folder,
+            desktop::storage_path,
+            desktop::open_viewer,
+            desktop::viewer_context,
+            desktop::close_viewer
         ])
         .setup(|app| {
             let root = {
@@ -367,8 +422,10 @@ pub fn run() {
                 cancelled: AtomicBool::new(false),
                 recording: AtomicBool::new(false),
                 pending: Mutex::new(None),
+                viewer: Mutex::new(None),
             });
             app.manage(state.clone());
+            foreground::start().map_err(std::io::Error::other)?;
             shelf_window::watch_displays(app.handle()).map_err(std::io::Error::other)?;
             shelf_window::timer(app.handle().clone(), state);
             let open =
@@ -376,7 +433,8 @@ pub fn run() {
             let exit =
                 tauri::menu::MenuItem::with_id(app, "exit", "Exit Captrain", true, None::<&str>)?;
             let menu = tauri::menu::Menu::with_items(app, &[&open, &exit])?;
-            let icon = tauri::image::Image::new_owned(tray_pixels(), 32, 32);
+            let pixels = image::load_from_memory(include_bytes!("../icons/32x32.png"))?.into_rgba8();
+            let icon = tauri::image::Image::new_owned(pixels.into_raw(), 32, 32);
             tauri::tray::TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("Captrain")
@@ -410,6 +468,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "viewer" && matches!(event, tauri::WindowEvent::Destroyed) {
+                desktop::viewer_closed(window.app_handle());
+            }
             if window.label() == "shelf" {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -430,7 +491,10 @@ pub fn run() {
                             };
                             GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid));
                         }
-                        if manual && pid != std::process::id() {
+                        if manual
+                            && pid != std::process::id()
+                            && state.viewer.lock().unwrap().is_none()
+                        {
                             let _ = shelf_window::action(window.app_handle(), "collapse");
                         }
                     }
@@ -443,16 +507,4 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("Captrain could not start");
-}
-fn tray_pixels() -> Vec<u8> {
-    let mut pixels = vec![0; 32 * 32 * 4];
-    for y in 6..26 {
-        for x in 7..25 {
-            if !(10..22).contains(&x) || !(9..23).contains(&y) || (13..19).contains(&y) {
-                let i = (y * 32 + x) * 4;
-                pixels[i..i + 4].copy_from_slice(&[78, 112, 153, 255]);
-            }
-        }
-    }
-    pixels
 }

@@ -246,7 +246,7 @@ pub fn apply(app: &AppHandle, activate: bool) {
         let (width, height) = if collapsed {
             (16.0, 72.0)
         } else {
-            (360.0, 520.0)
+            (540.0, 740.0)
         };
         let width = ((width * d.scale) as i32).min(d.work.right - d.work.left);
         let height = ((height * d.scale) as i32).min(d.work.bottom - d.work.top);

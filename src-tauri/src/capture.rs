@@ -206,9 +206,18 @@ fn acquire(flag: &AtomicBool) -> Result<()> {
 }
 
 pub fn start(app: &AppHandle, kind: Kind) -> Result<()> {
+    start_with(app, kind, false)
+}
+pub fn start_with(app: &AppHandle, kind: Kind, direct: bool) -> Result<()> {
     let state = app.state::<Arc<AppState>>().inner().clone();
+    if state.viewer.lock().unwrap().is_some() {
+        return Err("Close the image viewer before starting a capture.".into());
+    }
     // The foreground target and physical display are resolved before any app activation.
-    let foreground = unsafe { GetForegroundWindow() }.0 as isize;
+    let foreground = crate::foreground::target();
+    if kind == Kind::Window && direct {
+        eligible(HWND(foreground as *mut _))?;
+    }
     let display = shelf_window::pointer_display()?;
     acquire(&state.busy)?;
     state.cancelled.store(false, Ordering::Release);
@@ -216,7 +225,14 @@ pub fn start(app: &AppHandle, kind: Kind) -> Result<()> {
     state.timer.notify_one();
     let app = app.clone();
     std::thread::spawn(move || {
-        let result = prepare(&app, &state, kind, display, foreground);
+        let result = if kind == Kind::Window && direct {
+            shelf_window::apply(&app, false);
+            hide_and_flush(&app)
+                .and_then(|_| snapshot_window(foreground))
+                .map(Some)
+        } else {
+            prepare(&app, &state, kind, display, foreground)
+        };
         restore_foreground(&app, foreground);
         match result {
             Ok(Some(image)) => commit(&app, &state, kind, image),
@@ -235,6 +251,9 @@ fn hide_and_flush(app: &AppHandle) -> Result<()> {
                 w.hide().map_err(err)?;
             }
             if let Some(w) = app2.get_webview_window("overlay") {
+                w.hide().map_err(err)?;
+            }
+            if let Some(w) = app2.get_webview_window("viewer") {
                 w.hide().map_err(err)?;
             }
             Ok(())
@@ -448,15 +467,32 @@ fn commit(app: &AppHandle, state: &Arc<AppState>, kind: Kind, image: DynamicImag
         return;
     }
     let started = Instant::now();
-    let result = state.library.lock().unwrap().commit(kind, image);
+    let settings = state.settings.lock().unwrap().value.clone();
+    let result =
+        state
+            .library
+            .lock()
+            .unwrap()
+            .commit(kind, image, settings.active_folder.as_deref());
     match result {
-        Ok(item) => {
+        Ok(mut item) => {
+            let mut warning = None;
+            if let Some(folder) = settings.capture_folder {
+                match state.library.lock().unwrap().auto_export(&item.id, &folder) {
+                    Ok(exported) => item = exported,
+                    Err(e) => {
+                        warning = Some(format!(
+                            "Capture is safe in Captrain, but automatic save failed: {e}"
+                        ))
+                    }
+                }
+            }
             eprintln!(
                 "capture commit+thumbnail: {}ms",
                 started.elapsed().as_millis()
             );
             let _ = app.emit("capture-created", &item);
-            finish(app, state, true, None);
+            finish(app, state, true, warning);
         }
         Err(e) => finish(
             app,

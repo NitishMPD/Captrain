@@ -44,6 +44,40 @@ pub struct Item {
     pub width: u32,
     pub height: u32,
     pub filename: String,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub exported_path: Option<PathBuf>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_deserializing, default)]
+    pub count: usize,
+}
+#[derive(Serialize, Deserialize, Default)]
+struct Index {
+    items: Vec<Item>,
+    #[serde(default)]
+    folders: Vec<Folder>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredIndex {
+    Current(Index),
+    Legacy(Vec<Item>),
+}
+impl StoredIndex {
+    fn current(self) -> Index {
+        match self {
+            Self::Current(index) => index,
+            Self::Legacy(items) => Index {
+                items,
+                folders: vec![],
+            },
+        }
+    }
 }
 #[derive(Serialize)]
 pub struct Page {
@@ -54,6 +88,7 @@ pub struct Page {
 pub struct Library {
     pub root: PathBuf,
     items: Vec<Item>,
+    folders: Vec<Folder>,
     pub warning: Option<String>,
     writable: bool,
 }
@@ -82,37 +117,218 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 use std::os::windows::ffi::OsStrExt;
 
+fn valid_folder_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
+        return Err("Use a folder name of 1–60 characters.".into());
+    }
+    Ok(name.to_string())
+}
+
 impl Library {
+    fn persist(&self) -> Result<()> {
+        if !self.writable {
+            return Err("Capture index needs recovery; existing data was left untouched.".into());
+        }
+        atomic_write(
+            &self.root.join("index.json"),
+            &serde_json::to_vec(
+                &serde_json::json!({ "items": self.items, "folders": self.folders }),
+            )
+            .map_err(err)?,
+        )
+    }
+    pub fn folders(&self) -> Vec<Folder> {
+        self.folders
+            .iter()
+            .map(|folder| Folder {
+                count: self
+                    .items
+                    .iter()
+                    .filter(|i| {
+                        i.folder_id.as_deref() == Some(&folder.id) && self.path(i, false).is_file()
+                    })
+                    .count(),
+                ..folder.clone()
+            })
+            .collect()
+    }
+    pub fn create_folder(&mut self, name: &str) -> Result<Folder> {
+        let name = valid_folder_name(name)?;
+        if self
+            .folders
+            .iter()
+            .any(|f| f.name.to_lowercase() == name.to_lowercase())
+        {
+            return Err("A folder with that name already exists.".into());
+        }
+        let folder = Folder {
+            id: Uuid::new_v4().to_string(),
+            name,
+            count: 0,
+        };
+        self.folders.push(folder.clone());
+        if let Err(error) = self.persist() {
+            self.folders.pop();
+            return Err(error);
+        }
+        Ok(folder)
+    }
+    pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<()> {
+        let name = valid_folder_name(name)?;
+        if self
+            .folders
+            .iter()
+            .any(|f| f.id != id && f.name.to_lowercase() == name.to_lowercase())
+        {
+            return Err("A folder with that name already exists.".into());
+        }
+        let index = self
+            .folders
+            .iter()
+            .position(|f| f.id == id)
+            .ok_or("Folder not found.")?;
+        let previous = std::mem::replace(&mut self.folders[index].name, name);
+        if let Err(error) = self.persist() {
+            self.folders[index].name = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+    pub fn delete_folder(&mut self, id: &str) -> Result<()> {
+        let index = self
+            .folders
+            .iter()
+            .position(|f| f.id == id)
+            .ok_or("Folder not found.")?;
+        let folder = self.folders.remove(index);
+        let assigned: Vec<_> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.folder_id.as_deref() == Some(id))
+            .map(|(n, _)| n)
+            .collect();
+        for &n in &assigned {
+            self.items[n].folder_id = None;
+        }
+        if let Err(error) = self.persist() {
+            for n in assigned {
+                self.items[n].folder_id = Some(id.into());
+            }
+            self.folders.insert(index, folder);
+            return Err(error);
+        }
+        Ok(())
+    }
+    pub fn move_capture(&mut self, id: &str, folder: Option<&str>) -> Result<()> {
+        self.validate_folder(folder)?;
+        let index = self
+            .items
+            .iter()
+            .position(|i| i.id == id)
+            .ok_or("Capture not found.")?;
+        let previous =
+            std::mem::replace(&mut self.items[index].folder_id, folder.map(String::from));
+        if let Err(error) = self.persist() {
+            self.items[index].folder_id = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+    pub fn validate_folder(&self, folder: Option<&str>) -> Result<()> {
+        if folder.is_some_and(|id| !self.folders.iter().any(|f| f.id == id)) {
+            return Err("Folder no longer exists. Choose another folder.".into());
+        }
+        Ok(())
+    }
+    pub fn mark_exported(&mut self, id: &str, path: PathBuf) -> Result<Item> {
+        let index = self
+            .items
+            .iter()
+            .position(|i| i.id == id)
+            .ok_or("Capture not found.")?;
+        let previous = self.items[index].exported_path.replace(path);
+        if let Err(error) = self.persist() {
+            self.items[index].exported_path = previous;
+            return Err(error);
+        }
+        Ok(self.items[index].clone())
+    }
+    pub fn auto_export(&mut self, id: &str, directory: &Path) -> Result<Item> {
+        let (source, filename) = self.export_source(id)?;
+        let directory = directory.canonicalize().map_err(err)?;
+        if directory.starts_with(self.root.canonicalize().map_err(err)?) {
+            return Err("Choose a save folder outside Captrain's private library.".into());
+        }
+        let destination =
+            directory.join(format!("{}-{}.png", filename.trim_end_matches(".png"), id));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .map_err(err)?;
+        let write = (|| {
+            file.write_all(&fs::read(source).map_err(err)?)
+                .map_err(err)?;
+            file.sync_all().map_err(err)
+        })();
+        drop(file);
+        if let Err(error) = write {
+            let _ = fs::remove_file(&destination);
+            return Err(error);
+        }
+        // A metadata failure leaves the completed export intact and reports its location.
+        self.mark_exported(id, destination.clone()).map_err(|e| {
+            format!(
+                "Image saved at {}, but export history could not update: {e}",
+                destination.display()
+            )
+        })
+    }
     pub fn open(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("captures")).map_err(err)?;
         fs::create_dir_all(root.join("thumbnails")).map_err(err)?;
         let mut warning = None;
         let mut writable = true;
-        let items = match fs::read(root.join("index.json")) {
-            Ok(bytes) => match serde_json::from_slice::<Vec<Item>>(&bytes) {
-                Ok(items)
-                    if items.iter().all(|i| {
-                        Uuid::parse_str(&i.id).is_ok()
-                            && i.width > 0
-                            && i.height > 0
-                            && chrono::DateTime::parse_from_rfc3339(&i.created_at).is_ok()
-                    }) && {
-                        let mut ids = std::collections::HashSet::new();
-                        items.iter().all(|i| ids.insert(&i.id))
-                    } =>
-                {
-                    items
+        let index = match fs::read(root.join("index.json")) {
+            Ok(bytes) => {
+                match serde_json::from_slice::<StoredIndex>(&bytes).map(StoredIndex::current) {
+                    Ok(index)
+                        if index.items.iter().all(|i| {
+                            Uuid::parse_str(&i.id).is_ok()
+                                && i.width > 0
+                                && i.height > 0
+                                && chrono::DateTime::parse_from_rfc3339(&i.created_at).is_ok()
+                        }) && {
+                            let mut ids = std::collections::HashSet::new();
+                            index.items.iter().all(|i| ids.insert(&i.id))
+                        } && {
+                            let mut ids = std::collections::HashSet::new();
+                            index.folders.iter().all(|f| {
+                                Uuid::parse_str(&f.id).is_ok()
+                                    && valid_folder_name(&f.name).is_ok()
+                                    && ids.insert(&f.id)
+                            })
+                        } && index.items.iter().all(|i| {
+                            i.folder_id
+                                .as_ref()
+                                .is_none_or(|id| index.folders.iter().any(|f| &f.id == id))
+                        }) =>
+                    {
+                        index
+                    }
+                    _ => {
+                        writable = false;
+                        warning = Some("Capture index is damaged. It has been preserved; restore index.json from a backup before capturing again.".into());
+                        Index::default()
+                    }
                 }
-                _ => {
-                    writable = false;
-                    warning = Some("Capture index is damaged. It has been preserved; restore index.json from a backup before capturing again.".into());
-                    vec![]
-                }
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Index::default(),
             Err(e) => return Err(err(e)),
         };
-        if items.iter().any(|i| {
+        if index.items.iter().any(|i| {
             !root
                 .join("captures")
                 .join(format!("{}.png", i.id))
@@ -122,12 +338,23 @@ impl Library {
         }
         Ok(Self {
             root,
-            items,
+            items: index.items,
+            folders: index.folders,
             warning,
             writable,
         })
     }
     pub fn list(&self, query: &str, offset: usize, limit: usize) -> Page {
+        self.list_filtered(query, offset, limit, None, false)
+    }
+    pub fn list_filtered(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        folder: Option<&str>,
+        exported_only: bool,
+    ) -> Page {
         let q = query.to_lowercase();
         let terms: Vec<_> = q
             .split(|c: char| !c.is_alphanumeric())
@@ -138,6 +365,11 @@ impl Library {
             .iter()
             .rev()
             .filter(|i| {
+                if folder.is_some_and(|id| i.folder_id.as_deref() != Some(id))
+                    || (exported_only && i.exported_path.is_none())
+                {
+                    return false;
+                }
                 if !self.path(i, false).is_file() {
                     return false;
                 }
@@ -176,7 +408,13 @@ impl Library {
         let bytes = fs::read(self.path(item, thumbnail)).map_err(err)?;
         Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
     }
-    pub fn commit(&mut self, kind: Kind, image: DynamicImage) -> Result<Item> {
+    pub fn commit(
+        &mut self,
+        kind: Kind,
+        image: DynamicImage,
+        folder: Option<&str>,
+    ) -> Result<Item> {
+        self.validate_folder(folder)?;
         if !self.writable {
             return Err("Capture index needs recovery; existing data was left untouched.".into());
         }
@@ -194,6 +432,8 @@ impl Library {
                 kind.name(),
                 now.format("%Y%m%d-%H%M%S")
             ),
+            folder_id: folder.map(String::from),
+            exported_path: None,
         };
         let original = self.path(&item, false);
         let thumb = self.path(&item, true);
@@ -216,10 +456,7 @@ impl Library {
                 .and_then(|f| f.sync_all())
                 .map_err(err)?;
             self.items.push(item.clone());
-            let commit = atomic_write(
-                &self.root.join("index.json"),
-                &serde_json::to_vec(&self.items).map_err(err)?,
-            );
+            let commit = self.persist();
             if commit.is_err() {
                 self.items.pop();
             }
@@ -258,10 +495,7 @@ impl Library {
             .position(|i| i.id == id)
             .ok_or("Capture not found.")?;
         let item = self.items.remove(index);
-        if let Err(e) = atomic_write(
-            &self.root.join("index.json"),
-            &serde_json::to_vec(&self.items).map_err(err)?,
-        ) {
+        if let Err(e) = self.persist() {
             self.items.insert(index, item);
             return Err(e);
         }
@@ -283,11 +517,87 @@ impl Library {
 mod tests {
     use super::*;
     #[test]
+    fn folders_migrate_legacy_and_ungroup_without_deleting_images() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library
+            .commit(Kind::Screen, DynamicImage::new_rgba8(4, 3), None)
+            .unwrap();
+        let mut legacy = serde_json::to_value(&library.items).unwrap();
+        legacy[0].as_object_mut().unwrap().remove("folderId");
+        legacy[0].as_object_mut().unwrap().remove("exportedPath");
+        fs::write(
+            root.join("index.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        assert_eq!(library.list("", 0, 20).total, 1);
+        let folder = library.create_folder(" Ideas ").unwrap();
+        assert_eq!(folder.name, "Ideas");
+        assert!(library.create_folder("ideas").is_err());
+        assert!(library.create_folder("  ").is_err());
+        assert!(library.move_capture(&item.id, Some("../foreign")).is_err());
+        library.move_capture(&item.id, Some(&folder.id)).unwrap();
+        library.rename_folder(&folder.id, "Inspiration").unwrap();
+        let mut reopened = Library::open(root.clone()).unwrap();
+        assert_eq!(reopened.folders()[0].name, "Inspiration");
+        assert_eq!(reopened.folders()[0].count, 1);
+        assert_eq!(
+            reopened
+                .list_filtered("", 0, 20, Some(&folder.id), false)
+                .total,
+            1
+        );
+        reopened.delete_folder(&folder.id).unwrap();
+        assert_eq!(reopened.list("", 0, 20).items[0].folder_id, None);
+        assert!(reopened.image(&item.id, false).is_ok());
+        assert!(Library::open(root.clone()).unwrap().folders().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn auto_save_is_unique_and_library_delete_preserves_export() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let output = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&output).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        let folder = library.create_folder("Work").unwrap();
+        let item = library
+            .commit(
+                Kind::Region,
+                DynamicImage::new_rgba8(4, 3),
+                Some(&folder.id),
+            )
+            .unwrap();
+        assert!(library
+            .auto_export(&item.id, &root.join("captures"))
+            .is_err());
+        assert!(library
+            .auto_export(&item.id, &output.join("missing"))
+            .is_err());
+        assert_eq!(library.list_filtered("", 0, 20, None, true).total, 0);
+        let exported = library.auto_export(&item.id, &output).unwrap();
+        let path = exported.exported_path.unwrap();
+        assert_eq!(image::open(&path).unwrap().dimensions(), (4, 3));
+        assert!(library.auto_export(&item.id, &output).is_err());
+        assert_eq!(
+            Library::open(root.clone())
+                .unwrap()
+                .list_filtered("", 0, 20, None, true)
+                .total,
+            1
+        );
+        library.delete(&item.id).unwrap();
+        assert!(path.is_file());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(output).unwrap();
+    }
+    #[test]
     fn commit_reopen_delete_and_reject_foreign_ids() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let mut l = Library::open(root.clone()).unwrap();
         let item = l
-            .commit(Kind::Region, DynamicImage::new_rgba8(12, 8))
+            .commit(Kind::Region, DynamicImage::new_rgba8(12, 8), None)
             .unwrap();
         let displayed_date = chrono::DateTime::parse_from_rfc3339(&item.created_at)
             .unwrap()
@@ -317,7 +627,7 @@ mod tests {
         fs::write(root.join("index.json"), b"broken").unwrap();
         let mut l = Library::open(root.clone()).unwrap();
         assert!(l
-            .commit(Kind::Screen, DynamicImage::new_rgba8(1, 1))
+            .commit(Kind::Screen, DynamicImage::new_rgba8(1, 1), None)
             .is_err());
         assert_eq!(fs::read(root.join("index.json")).unwrap(), b"broken");
         fs::remove_dir_all(root).unwrap();
@@ -336,6 +646,8 @@ mod tests {
                 width: 1,
                 height: 1,
                 filename: format!("capture-{n}.png"),
+                folder_id: None,
+                exported_path: None,
             });
         }
         let page = l.list("screen", 20, 20);

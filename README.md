@@ -20,9 +20,11 @@ Closing the panel collapses it; use the tray menu to exit. Launching a second in
 | Capture screen | Ctrl+Alt+3 |
 | Toggle shelf | Ctrl+Alt+Space |
 
-Screen and region capture target the display containing the pointer. Drag in either direction for a region; click a highlighted window in window mode. Escape cancels selection. Region selection stays on one display. Window capture uses Windows Graphics Capture of the selected window, including when another window overlaps it. Captrain, minimized, hidden and cloaked windows are excluded.
+Screen and region capture target the display containing the pointer. Drag in either direction for a region; Escape cancels selection. Region selection stays on one display. **Instant capture** is on by default: the main Capture button executes the type selected through its separate arrow. Region opens selection immediately; Window captures the external window that was active before opening Captrain. The global window shortcut follows this setting too. Turn Instant off to make the main button ask for a capture type and use the highlighted-window picker. Window capture uses Windows Graphics Capture, including when another window overlaps it. Captrain, minimized, hidden and cloaked windows are excluded.
 
-Recent shows the newest 20 captures. Library searches kind, filename and local date. Preview supports Copy image (Ctrl+C), native Save as (Ctrl+Shift+S), and confirmed Delete. Captures never automatically replace the clipboard. Selecting a shortcut button records a new combination; registered combinations are routed into the recorder instead of triggering a capture. Failed registrations retain the previous working bindings.
+The reference-style shelf has All/Captures/Exports tabs, list/grid layout, search, colored folders and a capture/folder dock. It starts with 20 captures; Show more loads additional pages. Search matches kind, filename and local date. New folder creates an organizational folder; its context menu supports rename and deletion. Deleting a folder leaves its captures in the library. The footer's Folder selects where new captures are organized. A capture's right-click menu (also Menu key or Shift+F10) offers Open, Copy, Save as, Move to folder and confirmed Delete. Text fields retain their native editing menu.
+
+Click an image to open the native modal viewer over the shelf. Previous/next navigate the filtered library, including beyond the shelf's loaded page. Wheel or +/− zoom, drag pans, 0 fits, 1 shows actual size, arrows navigate, and Escape closes. The viewer also provides Copy image (Ctrl+C), native Save as (Ctrl+Shift+S), folder assignment and confirmed Delete. A new capture animates into the shelf; reduced motion skips the flight. The interface follows the system's light/dark preference. Captures never automatically replace the clipboard. Selecting a shortcut button records a new combination; registered combinations are routed into the recorder instead of triggering a capture. Failed registrations retain the previous working bindings.
 
 ## Data and recovery
 
@@ -34,6 +36,10 @@ thumbnails/<uuid>.png
 index.json
 settings.json
 ```
+
+**Choose a Windows save folder:** open **Settings → Save to disk → Choose folder**, or the footer's **Folder → Choose save location**. New captures are automatically copied there with unique PNG names. Turning automatic save off keeps new captures in the protected library only. Settings displays the protected library's exact path. Existing captures are not moved when changing the destination. If a drive disconnects or saving fails, the committed library capture is retained and an error is shown. Deleting a capture from Captrain removes its owned original and thumbnail; exported copies remain on disk.
+
+Organizational folders and memberships are persisted in `index.json`. Existing flat histories load without data movement and migrate to the combined items/folders index on their next mutation.
 
 Rust serializes mutations, writes and synchronizes images before replacing the index atomically, and emits capture-created only after commit. File commands resolve IDs inside the owned library; frontend content has no generic filesystem or shell access. Save as exports to a destination chosen in the native dialog, with its overwrite prompt, and leaves the library original intact. Exporting into the private library is rejected.
 
@@ -68,9 +74,11 @@ The implementation keeps shelf state and the single replaceable dismissal deadli
 
 ## Verification limits
 
-See `verification/current/native-results.txt`, `verification/current/resources.json`, and `tasks/task_14_oct.md` for actual results. All 11 frontend and 9 Rust tests, type checking and Clippy passed. Native checks passed for real screen, region and external-window acquisition, cancellation, persistence, shortcut-conflict rollback and 100 capture cycles (93.482 seconds). The current environment has Windows 11 Pro build 26200, Intel Core i7-14700, Rust 1.92, Node 24.2, MSVC Build Tools 18 and SDKs 22621/26100. Only a 1920×1080 display at 100% scale has been exercised. The native UI screenshots are real Tauri/WebView2 output.
+Screenshot-update checks passed: 12 Rust tests, frontend tests (22 screenshot tests plus 5 concurrent updater tests), type checking and Clippy. The new native evidence is in `verification/screenshot-update-final/native-results.txt` and screenshots in that directory. It verifies direct screen/region capture, the external active window after shelf activation, unique auto-saved copies, folder persistence/filtering, native owner-modal open/close and preservation of a capture when the output directory disappears. The UI actions in this diagnostic use DOM events, not real pointer/keyboard input. To repeat this focused diagnostic, set `CAPTRAIN_VERIFY_UPDATE=1` alongside `CAPTRAIN_VERIFY` before starting development mode, and remove both afterward. Diagnostic images are gitignored because they may include desktop content.
 
-The final debug sample included Captrain and its six WebView2 processes: 197.69 MiB private memory idle, 254.95 MiB after 100 cycles, and 0.623% of one CPU core (0.0222% of this 28-logical-CPU machine) over 60.21 idle seconds. Debug memory exceeds the provisional 150 MB goal. This bounded run does not establish leak-free behavior or release resource use. Some rapidly closed diagnostic overlays logged Tauri IPC transport fallback warnings; the native checks completed successfully. Release latency and memory acceptance remain open.
+Earlier checks in `verification/current/native-results.txt` and `verification/current/resources.json` passed real screen, region and external-window acquisition, cancellation, persistence, shortcut-conflict rollback and 100 capture cycles (93.482 seconds). See `tasks/task_14_oct.md` for the record. The current environment has Windows 11 Pro build 26200, Intel Core i7-14700, Rust 1.92, Node 24.2, MSVC Build Tools 18 and SDKs 22621/26100. Only a 1920×1080 display at 100% scale has been exercised. The native UI screenshots are real Tauri/WebView2 output.
+
+The earlier debug sample included Captrain and its six WebView2 processes: 197.69 MiB private memory idle, 254.95 MiB after 100 cycles, and 0.623% of one CPU core (0.0222% of this 28-logical-CPU machine) over 60.21 idle seconds. It predates the larger shelf and separate viewer. Debug memory exceeded the provisional 150 MB goal; resource use has not been remeasured for the new UI. This bounded run does not establish leak-free behavior or release resource use. Some rapidly closed diagnostic overlays logged Tauri IPC transport fallback warnings; the native checks completed successfully. Release latency and memory acceptance remain open.
 
 The Computer Use native pipe is unavailable here, so real keyboard/pointer interaction, clipboard paste into another app and native Save as interaction require manual checks. Test the shortcuts from another app, reverse region selection, window picking under overlap, Escape, hover pause, outside-click dismissal, image Copy/paste, export/overwrite/cancel, confirmed deletion and relaunch. Also test display disconnect and monitors at negative positions with 100%, 150% and 200% scaling, and a small work area. Check keyboard-only navigation, reduced motion, shortcut-recording conflicts and tray reopen/exit.
 
@@ -78,12 +86,38 @@ WGC access failures, explicit window display-affinity protection, unavailable ta
 
 Output is 8-bit SDR PNG. HDR tone/color accuracy is unverified and may clip highlights; validate on HDR hardware before relying on color fidelity. The default Windows capture border is retained. Development timing/memory does not establish release performance; the plan's latency, CPU and memory figures are provisional goals.
 
-Browser links, video, startup launch, folders/tags, annotation, OCR, sync and alternate formats are deferred as specified in PLAN.md.
+Browser links, video (confirmed by Nitish: screenshots first), startup launch, tags, annotation, OCR, sync and alternate formats remain deferred. Organizational folders are implemented.
 
 ## Release build (run yourself)
 
+### Automatic GitHub releases
+
+Like FB_rea, pushing to `main` or `master` runs `.github/workflows/release.yml` on Windows, tests the app, builds an x64 NSIS installer, and publishes a GitHub Release with generated notes. No manual tag is needed. CI uses the checked-in base version plus `GITHUB_RUN_NUMBER` for the patch (for example, base `0.1.0` and run 10 become `0.1.10`). Keep the base versions in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and their lockfiles aligned. Version changes stay in CI; nothing is committed back. Keep major/minor at most 255 and the resulting patch at most 65535 for Windows installer compatibility.
+
+The release stays a draft until the installer, `.exe.sig`, and signed-update manifest `latest.json` have uploaded and passed asset checks. A failed run may leave a draft; remove that failed draft/tag before rerunning the same run number. This workflow builds and publishes only when you push; no push or release was performed during setup.
+
+The public feed is `https://github.com/NitishMPD/Captrain/releases/latest/download/latest.json`. Install the first release manually. Installed release apps check after 10 seconds and every six hours. **Settings > App updates** supports manual checks, download progress, release notes, and **Restart and install**. Downloads and restarts require your action. The shelf shows an update notice. Finish any capture and close the viewer before installation. Your library and settings remain in local app data. Development mode does not fetch updates; failed downloads and installations can be retried.
+
+Tauri requires signed updates. The matching `TAURI_SIGNING_PRIVATE_KEY` repository secret has been configured on `NitishMPD/Captrain`; its public key is in `src-tauri/tauri.conf.json`. The private key is stored outside this checkout at `C:\Users\Admin\.tauri\captrain.key`. Back it up securely: replacing it breaks updates for existing installations. The generated key has no password, so leave `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` unset. For a future protected replacement key, configure both secrets and plan key migration before shipping. Update signing is separate from Windows Authenticode; Windows may display an unknown-publisher/SmartScreen prompt.
+
+Focused update checks, without building:
+
 ```powershell
-npm run tauri -- build
+node scripts/release-version.cjs --check
+node --test scripts/release-version.check.cjs
+npx vitest run src/updates/controller.test.ts
 ```
+
+### Manual local installer
+
+For a signed local installer, set the private-key path before building. Do not commit the key:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = 'C:\Users\Admin\.tauri\captrain.key'
+npm run package:windows
+Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY
+```
+
+The Windows x64 installer is produced at `src-tauri/target/release/bundle/nsis/Captrain_0.1.0_x64-setup.exe` for the checked-in version. No installer exists until that command completes; installer generation was not run here under the standing no-release-build instruction.
 
 No release build, branch, push or deployment was performed. The source icon and tray mark are simple procedural geometry authored for this app; there are no generated photographic assets or remote fonts.

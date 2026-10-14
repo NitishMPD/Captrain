@@ -2,13 +2,21 @@
 
 Author: Nitish
 
-Source of truth: PLAN.md, first release. Windows 11 x64, Tauri 2, React and TypeScript, Rust native ownership. Still captures only; links and video are later work.
+Source of truth: PLAN.md with Nitish's 14 October reference and requested screenshot workflow corrections below. Windows 11 x64, Tauri 2, React and TypeScript, Rust native ownership. Still captures only; Nitish confirmed screenshots first, with video later.
 
 ## User experience
 
-Launch as a right-edge 16 × 72 logical-pixel hit area containing a 6 × 56 bar. Hover grows the bar inward, never opens it. Click opens a warm-white 360 × 520 shelf, clamped to the monitor work area. Left/right edge and display are settings. Segoe UI Variable/Segoe UI, charcoal text, muted blue accents, rounded 18px shelf, 10px cards, 8px spacing scale, restrained motion with reduced-motion support.
+Launch as a right-edge 16 × 72 logical-pixel hit area containing a 6 × 56 bar. Hover grows the bar inward, never opens it. Click opens a warm-white 540 × 740 shelf, clamped to the monitor work area. Left/right edge and display are settings. Match the supplied reference's compact utility layout: segmented All/Captures/Exports header, list/grid toolbar, pastel tabbed folders with counts, filename rows and an anchored capture/folder footer. Segoe UI Variable/Segoe UI, charcoal text, rounded shelf, restrained motion with reduced-motion support.
 
-Header/search/settings, recent thumbnail captures, anchored Capture menu and Library. Preview provides Copy image, Save as, confirmed Delete and Back. Library searches kind, localized date and filename with pagination. Settings record actual global shortcut combinations and report native registration conflicts without discarding working bindings. No Record placeholders, automatic clipboard replacement, accounts or remote content.
+Library searches kind, localized date and filename with pagination and folder/export filters. Organizational folders support create, rename, delete without deleting captures, and moving captures. The footer's folder selects the destination for new captures; Settings separately selects an optional Windows directory for automatic PNG copies and exposes the current storage location. Originals remain in the private library, so disconnecting an output drive does not destroy history. Existing captures are never moved implicitly. Export copies survive deleting a library capture.
+
+Clicking a thumbnail opens a separate owner-modal native viewer over the shelf, with previous/next navigation across the filtered library, fit/1:1/zoom controls, wheel zoom, pointer pan, Copy, Save as, Move to folder and confirmed Delete. Escape closes it. The parent shelf is disabled and held open until viewer close. Capture rows offer the same appropriate actions through a custom right-click menu with keyboard support; editable text retains its text-editing menu. No browser page menu on the app surface.
+
+Instant capture is an explicit persisted setting, enabled by default. The main Capture button immediately executes the selected Region/Window/Screen action; its separate arrow changes type. Region immediately opens selection; direct Window captures the last external foreground window, remembered before shelf activation by a native foreground event hook. Disabling instant mode presents the action menu/window picker. A committed thumbnail animates into the shelf and settles into its row; reduced motion skips the flight. Settings retain transactional shortcut-conflict feedback. No Record placeholders, automatic clipboard replacement, accounts or remote content.
+
+## Brand identity
+
+Keep the Captrain name and existing utility style. The canonical mark is `public/captrain.svg`: a flat muted-blue (#3d5f94) rounded cube silhouette with a bold warm-white (#fcfaf7) C angled onto its right face, matching Nitish's approved rounded-cube C image, preserving its soft curved letter terminals. Keep the background transparent; no gradients, outlines or extra decoration. The shelf's brand button retains Show everything; Settings pairs the mark with the Captrain name. Use the same mark for the favicon, native tray, executable and installer. Generate native sizes with `npx tauri icon public/captrain.svg --output src-tauri/icons`; retain only the Windows PNG/ICO assets. Preserve the application identifier and storage paths.
 
 ## Native invariants
 
@@ -16,7 +24,13 @@ Rust owns the shelf state machine and its single replaceable dismissal deadline,
 
 One native transaction freezes a clean display after hiding app surfaces and synchronizing the compositor. Region selection uses physical pixels over the frozen display. Window selection uses eligible window rectangles and Windows Graphics Capture of the selected native window, never a desktop crop. PNGs and thumbnails commit before the atomic index replacement and notification. All file commands accept owned capture IDs. The frontend receives data URLs only for the visible page/preview. Export uses a native Save dialog and preserves the original.
 
-All files stay in per-user local app data. Malformed metadata/settings are preserved and reported. No silent purge. Shortcut changes register new bindings transactionally and retain old bindings on conflict. Single-instance and tray reopen/exit are required.
+Owned originals, thumbnails, metadata and settings stay in per-user local app data. Optional auto-saved copies use unique names and exclusive file creation in the native-selected Windows directory. A failed auto-save reports the error while retaining the committed library capture. The index migrates legacy flat history on its next mutation and atomically persists folder metadata and memberships together. Malformed metadata/settings are preserved and reported. No silent purge. Shortcut changes register new bindings transactionally and retain old bindings on conflict. Single-instance and tray reopen/exit are required.
+
+## GitHub releases and updates
+
+Match FB_rea's Windows release flow: every push to main/master builds a Windows x64 NSIS installer, assigns the base patch plus GitHub run number, and publishes a GitHub Release with generated notes. Upload the installer, signature and latest.json to a draft; validate the updater assets before publishing. Keep npm, Tauri, Cargo and both lockfile package versions synchronized in CI without committing version bumps.
+
+Installed release apps check the public NitishMPD/Captrain GitHub feed 10 seconds after launch and every six hours. Settings provide status, release notes, progress, manual check, explicit download and explicit restart/install; the shelf shows an available/ready update notice. Development never fetches updates. Tauri's updater owns HTTPS, version comparison and signature verification. Only the shelf may invoke update commands. Installation shares capture/viewer exclusion and waits for active persistence; captures and local data survive application replacement. Store the signing private key outside the checkout and in the GitHub Actions secret, with only its public key in app configuration. No Windows Authenticode certificate is configured.
 
 ## Verification boundary
 
