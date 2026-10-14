@@ -1,0 +1,85 @@
+{
+    "mode":  "debug",
+    "durationSeconds":  60.205671599999995,
+    "processes":  7,
+    "privateMB":  197.69140625,
+    "cpuOneCorePercent":  0.62286490630228275,
+    "cpuMachinePercent":  0.022245175225081525,
+    "logicalProcessors":  28,
+    "members":  [
+                    {
+                        "ProcessName":  "captrain",
+                        "Id":  38164,
+                        "PrivateMemorySize64":  13574144
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  27196,
+                        "PrivateMemorySize64":  40415232
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  33712,
+                        "PrivateMemorySize64":  3227648
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  25364,
+                        "PrivateMemorySize64":  78475264
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  31916,
+                        "PrivateMemorySize64":  12967936
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  26708,
+                        "PrivateMemorySize64":  7626752
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  24780,
+                        "PrivateMemorySize64":  51007488
+                    }
+                ],
+    "afterCyclesPrivateMB":  254.9453125,
+    "afterCyclesProcesses":  7,
+    "afterCyclesMembers":  [
+                               {
+                                   "ProcessName":  "captrain",
+                                   "Id":  38164,
+                                   "PrivateMemorySize64":  36642816
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  27196,
+                                   "PrivateMemorySize64":  43622400
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  33712,
+                                   "PrivateMemorySize64":  3117056
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  25364,
+                                   "PrivateMemorySize64":  97505280
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  31916,
+                                   "PrivateMemorySize64":  14790656
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  26708,
+                                   "PrivateMemorySize64":  7692288
+                               },
+                               {
+                                   "ProcessName":  "msedgewebview2",
+                                   "Id":  24780,
+                                   "PrivateMemorySize64":  63959040
+                               }
+                           ]
+}

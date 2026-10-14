@@ -1,0 +1,1 @@
+{"identifier":"local","description":"Local shelf and capture selection windows","windows":["shelf","overlay"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}

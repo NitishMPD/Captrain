@@ -1,0 +1,12 @@
+Native debug checks; display 1920x1080, scale 1
+PASS: frontend IPC ready; launch collapsed with tight 16x72 logical window
+PASS: real WGC screen capture, native dimensions, committed thumbnail/history; temporary reveal preserves foreground
+PASS: temporary reveal expires after ready; native shelf screenshot saved
+PASS: region cancellation restores collapsed state and leaves history unchanged
+PASS: region physical crop 240x160, native overlap guard, commit and real thumbnail
+PASS: on-disk library reopens with both committed captures
+PASS: actual OS shortcut conflict rejects edit and preserves previous bindings
+PASS: eligible external window picker and WGC native window capture commit
+PASS: 100 real region acquisition/commit/decode/collapse cycles in 73977ms
+NOT VERIFIED: real pointer/keyboard input, clipboard, Save dialog, mixed-DPI/HDR hardware, protected content, release performance
+Isolated test captures: C:\Users\Admin\AppData\Local\Temp\captrain-verification-992a87a6-6738-48a5-9952-b7fb5519af74

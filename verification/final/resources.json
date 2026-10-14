@@ -1,0 +1,48 @@
+{
+    "mode":  "debug",
+    "durationSeconds":  60.1383387,
+    "processes":  7,
+    "privateMB":  201.08203125,
+    "cpuOneCorePercent":  0.519635238942841,
+    "cpuMachinePercent":  0.01855840139081575,
+    "logicalProcessors":  28,
+    "members":  [
+                    {
+                        "ProcessName":  "captrain",
+                        "Id":  24768,
+                        "PrivateMemorySize64":  13373440
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  25552,
+                        "PrivateMemorySize64":  40738816
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  31356,
+                        "PrivateMemorySize64":  3264512
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  16708,
+                        "PrivateMemorySize64":  83460096
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  31316,
+                        "PrivateMemorySize64":  12947456
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  37800,
+                        "PrivateMemorySize64":  7647232
+                    },
+                    {
+                        "ProcessName":  "msedgewebview2",
+                        "Id":  36100,
+                        "PrivateMemorySize64":  49418240
+                    }
+                ],
+    "afterCyclesPrivateMB":  258.6171875,
+    "afterCyclesProcesses":  7
+}
