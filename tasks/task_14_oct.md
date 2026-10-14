@@ -65,3 +65,9 @@ Author: Nitish
 
 - Replaced only the shared SVG and generated Windows icon assets with vector contours following Nitish's final C image, including its soft rounded letter terminals. Retained the app's blue/warm-white colors and a transparent background; no additional UI changes.
 - Updated the brand description. Inspected the generated render and checked PNG dimensions. No builds or native runtime checks.
+
+### Installed app startup recovery
+
+- Identified a stale checkout debug process running without the Vite server. The shared single-instance guard redirected installed launches to that process, retaining its old tray icon and preventing the shelf from rendering.
+- Stopped only that stale debug process and launched the existing installed executable. Documented exiting development copies before launching the installed app.
+- Verification: installed process responds; the native collapsed window is visible at 16x72 at the right edge, and a second installed launch opens a visible 540x740 shelf with one process. The installed/release executables embed the current tray PNG; the stale debug executable does not. No builds, pushes, deployment or library changes. Visual rendering and capture interactions were not checked.

@@ -13,6 +13,8 @@ npm run tauri -- dev
 
 Closing the panel collapses it; use the tray menu to exit. Launching a second instance opens the existing shelf. Settings select the display, left/right edge and shortcut combinations.
 
+Before launching an installed copy, exit any development copy using **Exit Captrain** in its tray menu. Development and installed copies share the single-instance guard: a running debug copy receives subsequent launches, keeps its embedded older icon, and cannot render the shelf after its Vite server stops. Exit that copy and launch Captrain from the Start menu to use the installed app.
+
 | Action | Default shortcut |
 | --- | --- |
 | Capture region | Ctrl+Alt+1 |
