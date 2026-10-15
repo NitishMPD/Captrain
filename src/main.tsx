@@ -2,18 +2,19 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { Overlay } from './overlay/Overlay';
 import { Viewer } from './viewer/Viewer';
+import { Splash } from './Splash';
 import './styles.css';
 import { native, type Settings } from './native';
 
 const params = new URLSearchParams(location.search);
-const surface = params.get('overlay') === '1' ? 'overlay' : params.get('viewer') === '1' ? 'viewer' : 'shelf';
+const surface = params.get('splash') === '1' ? 'splash' : params.get('overlay') === '1' ? 'overlay' : params.get('viewer') === '1' ? 'viewer' : 'shelf';
 document.documentElement.dataset.surface = surface;
 const applyTheme = (theme: Settings['theme']) => {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem('theme', theme);
 };
 applyTheme((localStorage.getItem('theme') as Settings['theme']) ?? 'system');
-if (surface !== 'overlay') {
+if (surface !== 'overlay' && surface !== 'splash') {
   native.onSettingsChanged(settings => applyTheme(settings.theme))
     .then(() => native.settings()).then(settings => applyTheme(settings.theme)).catch(() => {});
 }
@@ -25,4 +26,4 @@ document.addEventListener('contextmenu', e => {
 });
 
 // No StrictMode: the shelf must subscribe once and send a single ready signal.
-createRoot(document.getElementById('root')!).render(surface === 'overlay' ? <Overlay /> : surface === 'viewer' ? <Viewer /> : <App />);
+createRoot(document.getElementById('root')!).render(surface === 'splash' ? <Splash /> : surface === 'overlay' ? <Overlay /> : surface === 'viewer' ? <Viewer /> : <App />);

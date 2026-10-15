@@ -166,8 +166,12 @@ pub async fn open_viewer(
 ) -> Result<()> {
     crate::shelf_only(&window)?;
     let state = app.state::<Arc<AppState>>();
-    if state.library.lock().unwrap().url(&id).is_ok() {
-        return Err("Open links in the browser instead of the image viewer.".into());
+    let non_image = {
+        let library = state.library.lock().unwrap();
+        library.url(&id).is_ok() || library.is_video(&id)?
+    };
+    if non_image {
+        return Err("Open links and recordings with their corresponding player.".into());
     }
     state.library.lock().unwrap().export_source(&id)?;
     if let Some(viewer) = app.get_webview_window("viewer") {

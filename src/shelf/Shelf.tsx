@@ -36,6 +36,8 @@ interface Props {
   onMore: () => void;
   onOpen: (item: CaptureItem) => void;
   onSettings: () => void;
+  onRecord: () => void;
+  recordingActive: boolean;
   onPatch: (patch: Partial<Settings>) => void;
   onSettingsSaved: (settings: Settings) => void;
   /** Items or folders changed in a way the list must reload. */
@@ -104,8 +106,8 @@ export function Shelf(p: Props) {
     native.moveCapture(item.id, folderId).then(onChanged).catch(report);
 
   const itemMenu = (item: CaptureItem): MenuItem[] => [
-    { label: item.kind === 'url' ? 'Open in browser' : 'Open', onSelect: () => p.onOpen(item) },
-    { label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) },
+    { label: item.kind === 'url' ? 'Open in browser' : item.kind === 'video' ? 'Play video' : 'Open', onSelect: () => p.onOpen(item) },
+    ...(item.kind === 'video' ? [] : [{ label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) }]),
     { label: 'Save as…', onSelect: () => native.save(item.id).then(ok => ok && setToast('Saved')).catch(report) },
     { label: 'Move to folder', submenu: [
       { label: 'No folder', checked: item.folderId === null, onSelect: () => move(item, null) },
@@ -168,8 +170,8 @@ export function Shelf(p: Props) {
           </main>
           <p className="toast" role="status">{toast}</p>
         </div>
-        <CaptureControl settings={settings} folders={folders} onPatch={p.onPatch} onSettings={p.onSettingsSaved}
-          onNewFolder={() => setDialog({ name: 'new-folder' })} onError={onError} />
+        <CaptureControl recordingActive={p.recordingActive} settings={settings} folders={folders} onPatch={p.onPatch} onSettings={p.onSettingsSaved}
+          onRecord={p.onRecord} onNewFolder={() => setDialog({ name: 'new-folder' })} onError={onError} />
       </div>
       {dialog?.name === 'new-folder' && (
         <NameDialog title="New folder" submit="Create" onCancel={closeDialog}
@@ -192,7 +194,7 @@ export function Shelf(p: Props) {
       )}
       {dialog?.name === 'delete' && (
         <ConfirmDialog title="Delete this capture?" confirm="Delete" busy={busy} onCancel={closeDialog}
-          body="The image and its thumbnail will be permanently removed from Captrain."
+          body="This item will be permanently removed from Captrain. Exported copies are kept."
           onConfirm={() => run(async () => { await native.delete(dialog.item.id); onChanged(); closeDialog(); })} />
       )}
     </>

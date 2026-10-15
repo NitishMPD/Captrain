@@ -4,3 +4,8 @@ src-tauri/target/
 *.log
 references/
 verification/
+
+recorder/obj/
+recorder/bin/
+src-tauri/recorder/*
+!src-tauri/recorder/README.txt

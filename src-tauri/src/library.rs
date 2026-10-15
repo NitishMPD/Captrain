@@ -25,14 +25,26 @@ pub enum Kind {
     Window,
     Screen,
     Url,
+    Video,
 }
 impl Kind {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Url => "url",
+            Self::Video => "mp4",
+            _ => "png",
+        }
+    }
+    pub fn is_image(self) -> bool {
+        matches!(self, Self::Region | Self::Window | Self::Screen)
+    }
     pub fn name(self) -> &'static str {
         match self {
             Self::Region => "region",
             Self::Window => "window",
             Self::Screen => "screen",
             Self::Url => "url",
+            Self::Video => "video",
         }
     }
 }
@@ -89,6 +101,13 @@ pub struct Page {
     pub total: usize,
 }
 
+#[derive(Clone, Copy)]
+pub enum Content {
+    All,
+    Images,
+    Captures,
+}
+
 pub struct Library {
     pub root: PathBuf,
     items: Vec<Item>,
@@ -97,10 +116,19 @@ pub struct Library {
     writable: bool,
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_file(path, |file| file.write_all(bytes).map_err(err))
+}
+pub fn atomic_copy(source: &Path, destination: &Path) -> Result<()> {
+    atomic_file(destination, |file| {
+        std::io::copy(&mut File::open(source).map_err(err)?, file).map_err(err)?;
+        Ok(())
+    })
+}
+fn atomic_file(path: &Path, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
     let temp = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut file = File::create(&temp).map_err(err)?;
-        file.write_all(bytes).map_err(err)?;
+        write(&mut file)?;
         file.sync_all().map_err(err)?;
         drop(file);
         let from: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -272,11 +300,10 @@ impl Library {
                 .unwrap_or_default()
                 .to_string_lossy(),
             id,
-            if source.extension().is_some_and(|e| e == "url") {
-                "url"
-            } else {
-                "png"
-            }
+            source
+                .extension()
+                .and_then(|e| e.to_str())
+                .ok_or("Capture has no extension.")?
         ));
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -284,8 +311,7 @@ impl Library {
             .open(&destination)
             .map_err(err)?;
         let write = (|| {
-            file.write_all(&fs::read(source).map_err(err)?)
-                .map_err(err)?;
+            std::io::copy(&mut File::open(source).map_err(err)?, &mut file).map_err(err)?;
             file.sync_all().map_err(err)
         })();
         drop(file);
@@ -296,7 +322,7 @@ impl Library {
         // A metadata failure leaves the completed export intact and reports its location.
         self.mark_exported(id, destination.clone()).map_err(|e| {
             format!(
-                "Image saved at {}, but export history could not update: {e}",
+                "Saved at {}, but export history could not update: {e}",
                 destination.display()
             )
         })
@@ -304,6 +330,7 @@ impl Library {
     pub fn open(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("captures")).map_err(err)?;
         fs::create_dir_all(root.join("thumbnails")).map_err(err)?;
+        fs::create_dir_all(root.join("recordings")).map_err(err)?;
         let mut warning = None;
         let mut writable = true;
         let index = match fs::read(root.join("index.json")) {
@@ -350,15 +377,29 @@ impl Library {
         };
         if index.items.iter().any(|i| {
             !root
-                .join("captures")
-                .join(format!(
-                    "{}.{}",
-                    i.id,
-                    if i.kind == Kind::Url { "url" } else { "png" }
-                ))
+                .join(if i.kind == Kind::Video {
+                    "recordings"
+                } else {
+                    "captures"
+                })
+                .join(format!("{}.{}", i.id, i.kind.extension()))
                 .is_file()
         }) {
             warning = Some("Some capture files are missing. Their metadata is preserved; only available captures are shown.".into());
+        }
+        let pending = fs::read_dir(root.join("recordings"))
+            .map_err(err)?
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.path().extension().is_some_and(|x| x == "mp4")
+                    && !index.items.iter().any(|i| {
+                        i.kind == Kind::Video
+                            && e.path().file_stem().is_some_and(|s| s == i.id.as_str())
+                    })
+            });
+        if pending {
+            warning = Some(format!("{}Interrupted or unindexed recordings were preserved in {}. Copy them elsewhere before attempting recovery.",
+                warning.map(|w| format!("{w} ")).unwrap_or_default(), root.join("recordings").display()));
         }
         Ok(Self {
             root,
@@ -379,7 +420,7 @@ impl Library {
         folder: Option<&str>,
         exported_only: bool,
     ) -> Page {
-        self.list_content(query, offset, limit, folder, exported_only, false)
+        self.list_content(query, offset, limit, folder, exported_only, Content::All)
     }
     pub fn list_content(
         &self,
@@ -388,7 +429,7 @@ impl Library {
         limit: usize,
         folder: Option<&str>,
         exported_only: bool,
-        images_only: bool,
+        content: Content,
     ) -> Page {
         let q = query.to_lowercase();
         let terms: Vec<_> = q
@@ -400,7 +441,8 @@ impl Library {
             .iter()
             .rev()
             .filter(|i| {
-                if (images_only && i.kind == Kind::Url)
+                if (matches!(content, Content::Images) && !i.kind.is_image())
+                    || (matches!(content, Content::Captures) && i.kind == Kind::Url)
                     || folder.is_some_and(|id| i.folder_id.as_deref() != Some(id))
                     || (exported_only && i.exported_path.is_none())
                 {
@@ -436,11 +478,21 @@ impl Library {
     }
     fn path(&self, item: &Item, thumbnail: bool) -> PathBuf {
         self.root
-            .join(if thumbnail { "thumbnails" } else { "captures" })
+            .join(if thumbnail {
+                "thumbnails"
+            } else if item.kind == Kind::Video {
+                "recordings"
+            } else {
+                "captures"
+            })
             .join(format!(
                 "{}.{}",
                 item.id,
-                if item.kind == Kind::Url { "url" } else { "png" }
+                if thumbnail {
+                    "png"
+                } else {
+                    item.kind.extension()
+                }
             ))
     }
     fn find(&self, id: &str) -> Result<&Item> {
@@ -451,8 +503,8 @@ impl Library {
     }
     pub fn image(&self, id: &str, thumbnail: bool) -> Result<String> {
         let item = self.find(id)?;
-        if item.kind == Kind::Url {
-            return Err("Links do not have an image.".into());
+        if !item.kind.is_image() {
+            return Err("This item does not have an image.".into());
         }
         let bytes = fs::read(self.path(item, thumbnail)).map_err(err)?;
         Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
@@ -463,8 +515,8 @@ impl Library {
         image: DynamicImage,
         folder: Option<&str>,
     ) -> Result<Item> {
-        if kind == Kind::Url {
-            return Err("Links must be saved with commit_url.".into());
+        if !kind.is_image() {
+            return Err("Use the link or video transaction for this item.".into());
         }
         self.validate_folder(folder)?;
         if !self.writable {
@@ -521,6 +573,55 @@ impl Library {
         }
         result.map(|_| item)
     }
+    pub fn validate_recording(&self, folder: Option<&str>) -> Result<()> {
+        if !self.writable {
+            return Err("Capture index needs recovery; existing data was left untouched.".into());
+        }
+        self.validate_folder(folder)
+    }
+    pub fn is_video(&self, id: &str) -> Result<bool> {
+        Ok(self.find(id)?.kind == Kind::Video)
+    }
+    pub fn commit_video(
+        &mut self,
+        id: &str,
+        width: u32,
+        height: u32,
+        folder: Option<&str>,
+    ) -> Result<Item> {
+        self.validate_recording(folder)?;
+        Uuid::parse_str(id).map_err(err)?;
+        if width < 2 || height < 2 || self.items.iter().any(|i| i.id == id) {
+            return Err("Invalid recording metadata.".into());
+        }
+        let now = Utc::now();
+        let item = Item {
+            id: id.into(),
+            kind: Kind::Video,
+            created_at: now.to_rfc3339(),
+            width,
+            height,
+            filename: format!("Captrain-video-{}.mp4", now.format("%Y%m%d-%H%M%S")),
+            folder_id: folder.map(String::from),
+            exported_path: None,
+            url: None,
+        };
+        let path = self.path(&item, false);
+        if fs::metadata(&path).map_err(err)?.len() == 0 {
+            return Err("The recorder produced an empty file.".into());
+        }
+        File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.sync_all())
+            .map_err(err)?;
+        self.items.push(item.clone());
+        if let Err(e) = self.persist() {
+            self.items.pop();
+            return Err(e);
+        }
+        Ok(item)
+    }
     pub fn commit_url(&mut self, url: &str, folder: Option<&str>) -> Result<Item> {
         let url = crate::links::validate_url(url)?;
         if !self.writable {
@@ -561,6 +662,9 @@ impl Library {
         )
     }
     pub fn copy(&self, id: &str) -> Result<()> {
+        if self.is_video(id)? {
+            return Err("Use Save as to copy a recording to a file.".into());
+        }
         if let Some(url) = &self.find(id)?.url {
             return arboard::Clipboard::new()
                 .map_err(err)?
@@ -615,6 +719,62 @@ impl Library {
 mod tests {
     use super::*;
     #[test]
+    fn videos_keep_owned_files_and_stream_exports_without_entering_image_navigation() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let exports = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        fs::create_dir(&exports).unwrap();
+        let mut l = Library::open(root.clone()).unwrap();
+        let id = Uuid::new_v4().to_string();
+        let path = root.join("recordings").join(format!("{id}.mp4"));
+        assert!(l.commit_video(&id, 1920, 1080, None).is_err());
+        // The media engine validates/finalizes MP4; this test exercises storage transactions.
+        fs::write(&path, b"recording fixture").unwrap();
+        assert!(Library::open(root.clone()).unwrap().warning.is_some());
+        assert!(l.commit_video("../foreign", 1920, 1080, None).is_err());
+        let folder = l.create_folder("Videos").unwrap();
+        let item = l.commit_video(&id, 1920, 1080, Some(&folder.id)).unwrap();
+        assert!(l.commit_video(&id, 1920, 1080, None).is_err());
+        assert!(l.is_video(&item.id).unwrap());
+        assert!(l.image(&item.id, false).is_err());
+        assert_eq!(
+            l.list_content("", 0, 20, None, false, Content::Images)
+                .total,
+            0
+        );
+        assert_eq!(
+            l.list_content("", 0, 20, None, false, Content::Captures)
+                .total,
+            1
+        );
+        let exported = l
+            .auto_export(&item.id, &exports)
+            .unwrap()
+            .exported_path
+            .unwrap();
+        assert_eq!(exported.extension().unwrap(), "mp4");
+        assert_eq!(fs::read(&exported).unwrap(), b"recording fixture");
+        let mut l = Library::open(root.clone()).unwrap();
+        assert!(l.warning.is_none());
+        assert_eq!(l.folders()[0].count, 1);
+        l.move_capture(&item.id, None).unwrap();
+        l.delete(&item.id).unwrap();
+        assert!(!path.exists());
+        assert!(exported.exists());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(exports).unwrap();
+    }
+    #[test]
+    fn failed_stream_copy_preserves_existing_destination() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        fs::create_dir(&root).unwrap();
+        let destination = root.join("saved.mp4");
+        fs::write(&destination, b"existing export").unwrap();
+        assert!(atomic_copy(&root.join("missing.mp4"), &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"existing export");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn links_persist_search_move_export_and_delete() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let mut l = Library::open(root.clone()).unwrap();
@@ -624,7 +784,11 @@ mod tests {
             .unwrap();
         assert!(l.commit_url("javascript:alert(1)", None).is_err());
         assert_eq!(l.list("example", 0, 20).total, 1);
-        assert_eq!(l.list_content("", 0, 20, None, false, true).total, 0);
+        assert_eq!(
+            l.list_content("", 0, 20, None, false, Content::Images)
+                .total,
+            0
+        );
         assert_eq!(l.folders()[0].count, 1);
         assert!(l.image(&item.id, false).is_err());
         assert!(fs::read_to_string(l.export_source(&item.id).unwrap().0)

@@ -93,7 +93,7 @@ pub async fn install_update(
     state
         .busy
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map_err(|_| "Finish the capture or close the viewer before restarting.".to_string())?;
+        .map_err(|_| "Finish the capture or recording, or close the viewer before restarting.".to_string())?;
     // Wait for any active synchronous persistence operation before the installer exits the app.
     let _settings = state.settings.lock().unwrap();
     let _library = state.library.lock().unwrap();

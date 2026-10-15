@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>Captrain.Recorder</AssemblyName>
+    <OutputPath>../src-tauri/recorder/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <LangVersion>latest</LangVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="ScreenRecorderLib" Version="7.0.1" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

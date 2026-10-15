@@ -3,6 +3,7 @@ mod desktop;
 mod foreground;
 mod library;
 mod links;
+mod recording;
 mod shelf_window;
 mod shortcuts;
 mod startup;
@@ -23,6 +24,7 @@ pub struct AppState {
     busy: AtomicBool,
     cancelled: AtomicBool,
     recording: AtomicBool,
+    video: Mutex<recording::Session>,
     pending: Mutex<Option<capture::Pending>>,
     viewer: Mutex<Option<desktop::ViewerContext>>,
 }
@@ -79,6 +81,7 @@ async fn list_captures(
     folder_id: Option<String>,
     exported_only: Option<bool>,
     images_only: Option<bool>,
+    captures_only: Option<bool>,
 ) -> Result<library::Page> {
     desktop::content_only(&window)?;
     let state = state.inner().clone();
@@ -89,7 +92,13 @@ async fn list_captures(
             limit,
             folder_id.as_deref(),
             exported_only.unwrap_or(false),
-            images_only.unwrap_or(false),
+            if images_only.unwrap_or(false) {
+                library::Content::Images
+            } else if captures_only.unwrap_or(false) {
+                library::Content::Captures
+            } else {
+                library::Content::All
+            },
         ))
     })
     .await
@@ -148,19 +157,21 @@ async fn save_capture(
     let state = state.inner().clone();
     let (source, name) = state.library.lock().unwrap().export_source(&id)?;
     shelf_window::action(&app, "hold")?;
-    let is_link = source.extension().is_some_and(|e| e == "url");
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or("Capture has no extension.")?
+        .to_owned();
+    let label = match extension.as_str() {
+        "url" => "Internet shortcut",
+        "mp4" => "MP4 video",
+        _ => "PNG image",
+    };
     let dialog = rfd::AsyncFileDialog::new()
         .set_parent(&window)
         .set_title("Save capture")
         .set_file_name(name)
-        .add_filter(
-            if is_link {
-                "Internet shortcut"
-            } else {
-                "PNG image"
-            },
-            if is_link { &["url"] } else { &["png"] },
-        )
+        .add_filter(label, &[extension.as_str()])
         .save_file()
         .await;
     let _ = shelf_window::action(&app, "release");
@@ -185,8 +196,7 @@ async fn save_capture(
     }
     let app2 = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes = std::fs::read(source).map_err(err)?;
-        library::atomic_write(&destination, &bytes)?;
+        library::atomic_copy(&source, &destination)?;
         state
             .library
             .lock()
@@ -194,7 +204,7 @@ async fn save_capture(
             .mark_exported(&id, destination.clone())
             .map_err(|e| {
                 format!(
-                    "Image saved at {}, but export history could not update: {e}",
+                    "Saved at {}, but export history could not update: {e}",
                     destination.display()
                 )
             })?;
@@ -346,6 +356,7 @@ pub fn run() {
                         }
                         Some("screen") => capture::start(app, Kind::Screen),
                         Some("url") => links::start(app),
+                        Some("video") => recording::open_setup(app),
                         _ => Ok(()),
                     };
                     if let Err(e) = result {
@@ -369,6 +380,12 @@ pub fn run() {
             shelf_state,
             shelf_action,
             start_capture,
+            recording::recording_targets,
+            recording::recording_devices,
+            recording::recording_state,
+            recording::start_recording,
+            recording::recording_control,
+            recording::play_recording,
             links::save_link,
             links::open_link,
             startup::get_startup,
@@ -438,6 +455,7 @@ pub fn run() {
                 busy: AtomicBool::new(false),
                 cancelled: AtomicBool::new(false),
                 recording: AtomicBool::new(false),
+                video: Mutex::new(recording::Session::default()),
                 pending: Mutex::new(None),
                 viewer: Mutex::new(None),
             });
@@ -463,8 +481,16 @@ pub fn run() {
                         let _ = shelf_window::action(app, "open");
                     }
                     "exit" => {
-                        let _ = app.global_shortcut().unregister_all();
-                        app.exit(0);
+                        let state = app.state::<Arc<AppState>>();
+                        if state.busy.load(std::sync::atomic::Ordering::Acquire) {
+                            let mut shelf = state.shelf.lock().unwrap();
+                            shelf.view.error = Some("Finish the current capture, recording, viewer or update before exiting.".into());
+                            drop(shelf);
+                            let _ = shelf_window::action(app, "open");
+                        } else {
+                            let _ = app.global_shortcut().unregister_all();
+                            app.exit(0);
+                        }
                     }
                     _ => {}
                 })
@@ -481,6 +507,34 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            #[cfg(debug_assertions)]
+            let verifying = std::env::var_os("CAPTRAIN_VERIFY").is_some();
+            #[cfg(not(debug_assertions))]
+            let verifying = false;
+            if !verifying {
+                // Click-through logo splash; no IPC, so it needs no capability and just closes itself.
+                let splash = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "splash",
+                    tauri::WebviewUrl::App("index.html?splash=1".into()),
+                )
+                .title("Captrain")
+                .inner_size(240.0, 240.0)
+                .center()
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .resizable(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .focused(false)
+                .build()?;
+                splash.set_ignore_cursor_events(true)?;
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(2000));
+                    let _ = splash.destroy();
+                });
+            }
             #[cfg(debug_assertions)]
             verification::start(app.handle());
             Ok(())

@@ -88,7 +88,31 @@ WGC access failures, explicit window display-affinity protection, unavailable ta
 
 Output is 8-bit SDR PNG. HDR tone/color accuracy is unverified and may clip highlights; validate on HDR hardware before relying on color fidelity. The default Windows capture border is retained. Development timing/memory does not establish release performance; the plan's latency, CPU and memory figures are provisional goals.
 
-Browser links, video (confirmed by Nitish: screenshots first), startup launch, tags, annotation, OCR, sync and alternate formats remain deferred. Organizational folders are implemented.
+Browser link saving, appearance, Windows startup, organizational folders and initial video recording are implemented. Tags, annotation, OCR, sync and alternate screenshot formats remain deferred.
+
+## Recording
+
+Use **Record video** in the footer. Screen, window and region recording default to **silent screen only**. System sound, a selected microphone and a selected webcam are independent opt-ins. Setup offers 30/60 fps, three quality presets, original/1080p/720p output, cursor visibility and a countdown. Open the red shelf bar for Pause/Resume and Stop. After stopping, play the MP4 with Windows' default video player, save a copy, move it to a library folder or delete it. Automatic disk copies also support MP4. The webcam currently uses a square inset, with corner and size choices; circular masking and mirror are not implemented.
+
+The native recording helper uses ScreenRecorderLib 7.0.1 (MIT), Windows Graphics Capture, D3D11, WASAPI and Media Foundation. It runs only during device enumeration or recording; frames never pass through the web UI. Windows may select software despite the hardware-encoding request, so hardware selection and smoothness must be verified on each supported GPU. No frame-drop, HDR, audio sync, webcam or sustained performance claim has been verified by the automated storage/UI checks.
+
+For development, install the .NET SDK and existing Visual Studio C++ Build Tools, then run:
+
+```powershell
+npm run recorder:build
+npm run tauri -- dev
+```
+
+The recording helper uses Windows 11's .NET Framework 4.8. The build script bundles app-local VC runtime DLLs and the recorder license. `npm run package:windows` builds and bundles the helper automatically. These commands are provided for you to run; no app/helper/installer binary was built during this change.
+
+To check C# API compatibility **without emitting a binary**, restore packages and run:
+
+```powershell
+dotnet restore recorder/Captrain.Recorder.csproj -p:Platform=x64 --locked-mode
+powershell -NoProfile -File recorder/typecheck.ps1
+```
+
+Interrupted/unindexed MP4s are retained under the private storage directory's `recordings` folder. Errors and the next launch report their location. Copy them elsewhere before attempting repair; recovery is manual and damaged files are not guaranteed playable. Finish recording before exiting Captrain or installing an update. Windows N/KN requires the Media Feature Pack.
 
 ## Release build (run yourself)
 

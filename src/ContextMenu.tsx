@@ -22,6 +22,7 @@ function Menu({ anchor, onClose }: { anchor: Anchor; onClose: () => void }) {
   const [pos, setPos] = useState({ left: anchor.x, top: anchor.y });
   const ref = useRef<HTMLDivElement>(null);
   const items = stack[stack.length - 1];
+  const hasChecks = items.some(item => item.checked !== undefined);
   useHold(true);
 
   // Measured before paint so the menu never flashes outside the viewport.
@@ -78,7 +79,7 @@ function Menu({ anchor, onClose }: { anchor: Anchor; onClose: () => void }) {
           <button role={item.checked === undefined ? 'menuitem' : 'menuitemradio'} aria-checked={item.checked}
             aria-haspopup={item.submenu ? 'menu' : undefined} disabled={item.disabled}
             className={item.danger ? 'danger' : undefined} onClick={() => choose(item)}>
-            <span>{item.checked !== undefined && <span className="menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>}{item.label}</span>
+            <span className="menu-label">{hasChecks && <span className="menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>}{item.label}</span>
             {item.hint ? <kbd>{item.hint}</kbd> : item.submenu ? <span aria-hidden="true">›</span> : null}
           </button>
         </div>

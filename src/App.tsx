@@ -4,9 +4,10 @@ import { native, type CaptureItem, type Settings as SettingsData, type ShelfStat
 import { Settings } from './settings/Settings';
 import { NO_FILTERS, Shelf, type Filters } from './shelf/Shelf';
 import { errorMessage, quiet } from './util';
+import { RecordingSetup, RecordingStatus, useRecording } from './recording/Recording';
 import { startUpdateChecks, useUpdates } from './updates/updates';
 
-type View = 'shelf' | 'settings';
+type View = 'shelf' | 'settings' | 'recording';
 
 const PAGE = 20;
 
@@ -16,6 +17,8 @@ function afterPaint(run: () => void) {
 }
 
 export function App() {
+  const recording = useRecording();
+  const recordingActive = recording.status !== 'idle';
   const update = useUpdates();
   useEffect(startUpdateChecks, []);
   const [shelf, setShelf] = useState<ShelfState>({ mode: 'collapsed', hovered: false, error: null, reveal: 0 });
@@ -39,7 +42,7 @@ export function App() {
     awaitingItem.current = false;
     armTimer();
   }, [armTimer]);
-  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports', filters.tab === 'captures');
+  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports', false, filters.tab === 'captures');
 
   const changeFilters = (next: Filters) => { setFilters(next); setLimit(PAGE); };
   const bump = useCallback(() => setRev(r => r + 1), []);
@@ -48,7 +51,8 @@ export function App() {
     let disposed = false;
     const unlisten: (() => void)[] = [];
     (async () => {
-      const [offState, offCapture, offLibrary] = await Promise.all([
+      const [offState, offCapture, offLibrary, offRecording] = await Promise.all([
+        native.onOpenRecording(() => setView('recording')),
         native.onState(s => {
           const previous = mode.current;
           mode.current = s.mode;
@@ -70,8 +74,8 @@ export function App() {
           native.settings().then(s => { if (!disposed) setSettings(s); }).catch(() => {});
         }),
       ]);
-      if (disposed) { offState(); offCapture(); offLibrary(); return; }
-      unlisten.push(offState, offCapture, offLibrary);
+      if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); return; }
+      unlisten.push(offState, offCapture, offLibrary, offRecording);
       const [state, loaded] = await Promise.all([native.state(), native.settings()]);
       if (disposed) return;
       mode.current = state.mode;
@@ -109,7 +113,7 @@ export function App() {
   const error = notice ?? shelf.error;
   const dismiss = () => { setNotice(null); if (shelf.error) quiet(native.shelf('clearError')); };
   const openViewer = (item: CaptureItem) =>
-    (item.kind === 'url' ? native.openLink(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports')).catch(e => setNotice(errorMessage(e)));
+    (item.kind === 'url' ? native.openLink(item.id) : item.kind === 'video' ? native.playRecording(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports')).catch(e => setNotice(errorMessage(e)));
 
   if (shelf.mode === 'capturing') return null;
 
@@ -124,7 +128,7 @@ export function App() {
   if (shelf.mode === 'collapsed') {
     return (
       <div {...root}>
-        <button className="bar" data-hovered={shelf.hovered} aria-label="Open Captrain shelf" onClick={() => quiet(native.shelf('open'))}>
+        <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} onClick={() => quiet(native.shelf('open'))}>
           <span className="bar-line" />
         </button>
       </div>
@@ -134,6 +138,7 @@ export function App() {
   return (
     <div {...root} onPointerDownCapture={() => { if (shelf.mode === 'temporary') quiet(native.shelf('interact')); }}>
       <section className="panel" aria-label="Captrain shelf">
+        {recordingActive && <RecordingStatus state={recording} onError={setNotice} />}
         {view === 'shelf' && ['available', 'downloaded'].includes(update.status) && (
           <div className="banner" role="status">
             <span>Captrain {update.available?.version} {update.status === 'downloaded' ? 'is ready to install' : 'is available'}.</span>
@@ -147,11 +152,12 @@ export function App() {
           </div>
         )}
         {view === 'shelf' && (
-          <Shelf items={list.items} total={list.total} thumbs={list.thumbs} loaded={list.loaded} error={list.error} freshId={freshId}
+          <Shelf recordingActive={recordingActive} items={list.items} total={list.total} thumbs={list.thumbs} loaded={list.loaded} error={list.error} freshId={freshId}
             rev={rev} settings={settings} filters={filters} onFilters={changeFilters} onMore={() => setLimit(l => l + PAGE)}
-            onOpen={openViewer} onSettings={() => setView('settings')} onPatch={patch} onSettingsSaved={setSettings}
+            onOpen={openViewer} onRecord={() => setView('recording')} onSettings={() => setView('settings')} onPatch={patch} onSettingsSaved={setSettings}
             onChanged={bump} onError={setNotice} />
         )}
+        {view === 'recording' && <RecordingSetup display={settings?.display ?? null} onBack={() => setView('shelf')} onStarted={() => setView('shelf')} />}
         {view === 'settings' && settings && (
           <Settings settings={settings} onSaved={setSettings} onBack={() => setView('shelf')} />
         )}

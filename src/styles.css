@@ -173,7 +173,8 @@ li:last-child .row { border-bottom-color: transparent; }
 .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--accent-soft); outline: none; }
 .menu button.danger { color: var(--danger); }
 .menu-sep { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
-.menu-check { display: inline-block; width: 18px; color: var(--accent-text); }
+.menu-label { display: flex; align-items: center; }
+.menu-check { flex: 0 0 18px; color: var(--accent-text); }
 .menu-back { color: var(--muted); }
 
 .banner { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; background: var(--danger-bg); color: var(--danger-fg); border-bottom: 1px solid var(--border); font-size: 13px; }
@@ -251,4 +252,45 @@ html[data-surface="overlay"] body { background: transparent; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tint-mix: 20%; } }
 .thumb > .icon { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 28px; height: 28px; color: var(--accent-text); }
 
-.dock > .icon-btn { align-self: center; }
+.link-row .thumb { background: var(--accent-soft); border-color: transparent; }
+.link-row .meta { flex: 1; }
+.meta .link-address { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.link-open { display: flex; color: var(--muted); }
+.link-open .icon { width: 16px; height: 16px; }
+.link-row:hover .link-open, .link-row:focus-visible .link-open { color: var(--accent-text); }
+.grid .link-row { position: relative; }
+.grid .link-open { position: absolute; top: 14px; right: 14px; }
+
+/* Recording setup shares the shelf's compact, scrollable sheet. */
+.recording-setup { padding: 4px 20px 20px; }
+.recording-intro { color: var(--muted); margin: 4px 0 20px; line-height: 1.5; }
+.recording-setup fieldset { border: 0; padding: 0; margin: 0 0 22px; min-width: 0; }
+.recording-setup legend { font-weight: 600; margin-bottom: 10px; }
+.recording-setup label { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; color: var(--muted); }
+.recording-setup select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--border); border-radius: 8px; padding: 0 8px; color: var(--text); background: var(--card); font: inherit; }
+.recording-setup .recording-check { flex-direction: row; align-items: center; gap: 10px; color: var(--text); min-height: 28px; }
+.recording-check input { accent-color: var(--accent); width: 16px; height: 16px; }
+.recording-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.recording-columns label { min-width: 0; }
+.recording-hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 8px 0; }
+.recording-footer { padding: 12px 20px; display: flex; justify-content: flex-end; gap: 8px; }
+.recording-status { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 12px 16px; background: var(--surface); }
+.recording-readout { flex: 1; min-width: 0; display: grid; grid-template-columns: 10px 1fr; gap: 4px 8px; align-items: center; }
+.recording-readout strong { font-variant-numeric: tabular-nums; font-size: 13px; }
+.recording-readout small { grid-column: 2; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.record-dot { width: 8px; height: 8px; background: var(--danger); border-radius: 50%; }
+.record-dot[data-paused="true"] { background: var(--muted); }
+.bar[data-recording="true"] .bar-line { background: var(--danger); }
+
+/* Startup splash: transparent window; hexagon settles in, the C traces and fills, a light sweep passes, then it fades (window closes at 2s). */
+.splash { width: 100%; height: 100%; display: grid; place-items: center; }
+.splash-logo { width: 160px; height: 160px; animation: splash-out 2s ease both; }
+.splash-hex { animation: splash-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.splash-c { stroke-dasharray: 1; stroke-dashoffset: 1; fill-opacity: 0; animation: splash-trace 0.7s ease-in-out 0.3s forwards, splash-fill 0.3s ease 0.9s forwards; }
+.splash-sweep { transform: skewX(-20deg) translateX(0); animation: splash-sweep 0.7s ease-in-out 1s both; }
+@keyframes splash-in { from { opacity: 0; transform: translateY(24px); filter: blur(12px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes splash-trace { to { stroke-dashoffset: 0; } }
+@keyframes splash-fill { to { fill-opacity: 1; } }
+@keyframes splash-sweep { from { transform: skewX(-20deg) translateX(0); } to { transform: skewX(-20deg) translateX(1100px); } }
+@keyframes splash-out { 0%, 82% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .splash-hex, .splash-c, .splash-sweep { animation: none; } .splash-c { stroke-dashoffset: 0; fill-opacity: 1; } .splash-sweep { display: none; } }

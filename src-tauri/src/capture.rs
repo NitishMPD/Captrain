@@ -106,12 +106,6 @@ fn snapshot_monitor(monitor: Monitor) -> Result<DynamicImage> {
 fn snapshot_window(id: isize) -> Result<DynamicImage> {
     let hwnd = HWND(id as *mut _);
     eligible(hwnd)?;
-    let mut affinity = 0u32;
-    // This query only succeeds for layered windows; WGC owns capture access for other targets.
-    let _ = unsafe { GetWindowDisplayAffinity(hwnd, &mut affinity) };
-    if affinity != 0 {
-        return Err("This window is protected from capture.".into());
-    }
     snapshot_hwnd(hwnd)
 }
 fn snapshot_hwnd(hwnd: HWND) -> Result<DynamicImage> {
@@ -136,7 +130,7 @@ pub fn verification_screenshot(
         .save(path)
         .map_err(err)
 }
-fn eligible(hwnd: HWND) -> Result<RECT> {
+pub(crate) fn eligible(hwnd: HWND) -> Result<RECT> {
     unsafe {
         if !IsWindow(Some(hwnd)).as_bool()
             || !IsWindowVisible(hwnd).as_bool()
@@ -148,6 +142,12 @@ fn eligible(hwnd: HWND) -> Result<RECT> {
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if pid == std::process::id() {
             return Err("Captrain cannot capture its own windows.".into());
+        }
+        let mut affinity = 0u32;
+        // This query only succeeds for layered windows; WGC enforces access for other targets.
+        let _ = GetWindowDisplayAffinity(hwnd, &mut affinity);
+        if affinity != 0 {
+            return Err("This window is protected from capture.".into());
         }
         let mut cloaked = 0u32;
         DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, 4)
@@ -209,7 +209,7 @@ pub fn start(app: &AppHandle, kind: Kind) -> Result<()> {
     start_with(app, kind, false)
 }
 pub fn start_with(app: &AppHandle, kind: Kind, direct: bool) -> Result<()> {
-    if kind == Kind::Url {
+    if matches!(kind, Kind::Url | Kind::Video) {
         return Err("Use Save link to save a browser URL.".into());
     }
     let state = app.state::<Arc<AppState>>().inner().clone();
@@ -245,7 +245,7 @@ pub fn start_with(app: &AppHandle, kind: Kind, direct: bool) -> Result<()> {
     });
     Ok(())
 }
-fn hide_and_flush(app: &AppHandle) -> Result<()> {
+pub(crate) fn hide_and_flush(app: &AppHandle) -> Result<()> {
     let (tx, rx) = mpsc::sync_channel(1);
     let app2 = app.clone();
     app.run_on_main_thread(move || {
@@ -307,6 +307,59 @@ fn prepare(
     if kind == Kind::Screen {
         return Ok(Some(image));
     }
+    let Some(selection) = choose(app, state, kind, &d, &image, foreground)? else {
+        return Ok(None);
+    };
+    restore_foreground(app, foreground);
+    hide_and_flush(app)?;
+    if kind == Kind::Region {
+        Ok(Some(crop(&image, &selection)?))
+    } else {
+        drop(image);
+        let id = selection
+            .window_id
+            .as_deref()
+            .ok_or("Choose a window.")?
+            .parse()
+            .map_err(err)?;
+        snapshot_window(id).map(Some)
+    }
+}
+pub(crate) fn select_region(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    d: &DisplayInfo,
+) -> Result<Option<(u32, u32, u32, u32)>> {
+    shelf_window::apply(app, false);
+    hide_and_flush(app)?;
+    let image = snapshot_monitor(Monitor::from_raw_hmonitor(d.monitor.as_raw_hmonitor()))?;
+    if (image.width(), image.height())
+        != (
+            (d.bounds.right - d.bounds.left) as u32,
+            (d.bounds.bottom - d.bounds.top) as u32,
+        )
+    {
+        return Err("Display geometry changed. Please try again.".into());
+    }
+    choose(
+        app,
+        state,
+        Kind::Region,
+        d,
+        &image,
+        crate::foreground::target(),
+    )?
+    .map(|s| validate_rect(image.width(), image.height(), &s))
+    .transpose()
+}
+fn choose(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    kind: Kind,
+    d: &DisplayInfo,
+    image: &DynamicImage,
+    foreground: isize,
+) -> Result<Option<Selection>> {
     let mut candidates = vec![];
     let mut windows = vec![];
     if kind == Kind::Window {
@@ -355,6 +408,7 @@ fn prepare(
         sender: Some(selection_tx),
     });
     let app2 = app.clone();
+    let bounds = d.bounds;
     let (tx, rx) = mpsc::sync_channel(1);
     app.run_on_main_thread(move || {
         let result: Result<()> = (|| {
@@ -372,12 +426,12 @@ fn prepare(
             .build()
             .map_err(err)?;
             window
-                .set_position(PhysicalPosition::new(d.bounds.left, d.bounds.top))
+                .set_position(PhysicalPosition::new(bounds.left, bounds.top))
                 .map_err(err)?;
             window
                 .set_size(PhysicalSize::new(
-                    (d.bounds.right - d.bounds.left) as u32,
-                    (d.bounds.bottom - d.bounds.top) as u32,
+                    (bounds.right - bounds.left) as u32,
+                    (bounds.bottom - bounds.top) as u32,
                 ))
                 .map_err(err)?;
             window.show().map_err(err)?;
@@ -393,26 +447,17 @@ fn prepare(
     }
     let selection = selection_rx.recv().map_err(err)?;
     state.pending.lock().unwrap().take();
+    restore_foreground(app, foreground);
+    if let Some(window) = app.get_webview_window("overlay") {
+        let _ = window.destroy();
+    }
     let Some(selection) = selection else {
         return Ok(None);
     };
     if state.cancelled.load(Ordering::Acquire) {
         return Ok(None);
     }
-    restore_foreground(app, foreground);
-    hide_and_flush(app)?;
-    if kind == Kind::Region {
-        Ok(Some(crop(&image, &selection)?))
-    } else {
-        drop(image);
-        let id = selection
-            .window_id
-            .as_deref()
-            .ok_or("Choose a window.")?
-            .parse()
-            .map_err(err)?;
-        snapshot_window(id).map(Some)
-    }
+    Ok(Some(selection))
 }
 fn validate_rect(width: u32, height: u32, selection: &Selection) -> Result<(u32, u32, u32, u32)> {
     let [Some(x), Some(y), Some(w), Some(h)] =

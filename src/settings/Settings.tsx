@@ -11,6 +11,7 @@ const ACTIONS: { id: Action; label: string }[] = [
   { id: 'window', label: 'Capture window' },
   { id: 'screen', label: 'Capture screen' },
   { id: 'url', label: 'Save browser link' },
+  { id: 'video', label: 'Video' },
   { id: 'toggle', label: 'Toggle shelf' },
 ];
 

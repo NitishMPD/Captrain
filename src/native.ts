@@ -3,16 +3,36 @@ import { listen } from '@tauri-apps/api/event';
 
 export type CaptureKind = 'region' | 'window' | 'screen';
 export type Mode = 'collapsed' | 'temporary' | 'manual' | 'capturing';
-export interface CaptureItem { id: string; kind: CaptureKind | 'url'; url: string | null; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
+export interface CaptureItem { id: string; kind: CaptureKind | 'url' | 'video'; url: string | null; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
 export interface Folder { id: string; name: string; count: number; }
 export interface ViewerContext { id: string; query: string; folderId: string | null; exportedOnly: boolean; }
 export interface ShelfState { mode: Mode; hovered: boolean; error: string | null; reveal: number; }
-export interface Settings { edge: 'left' | 'right'; display: string | null; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; theme: 'system' | 'light' | 'dark'; }
+export interface Settings { edge: 'left' | 'right'; display: string | null; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'video' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; theme: 'system' | 'light' | 'dark'; }
 export interface Display { id: string; name: string; }
 export interface LibraryPage { items: CaptureItem[]; total: number; }
 export interface OverlayData { kind: 'region' | 'window'; image: string | null; width: number; height: number; windows: { id: string; x: number; y: number; width: number; height: number }[]; }
 
+export interface RecordingOptions {
+  kind: CaptureKind; display: string; window: string | null;
+  fps: 30 | 60; quality: 'standard' | 'high' | 'maximum'; resolution: 0 | 720 | 1080;
+  cursor: boolean; countdown: boolean; systemAudio: boolean;
+  microphone: string | null; camera: string | null;
+  corner: 'TopLeft' | 'TopRight' | 'BottomLeft' | 'BottomRight'; cameraSize: 15 | 22 | 30;
+}
+export interface RecordingState { status: string; elapsedMs: number; frames: number; error: string | null; options: RecordingOptions | null; }
+export interface RecordingDevice { id: string; name: string; }
+export interface RecordingDevices { microphones: RecordingDevice[]; cameras: RecordingDevice[]; }
+export interface RecordingTargets { displays: RecordingDevice[]; windows: RecordingDevice[]; }
+
 export const native = {
+  recordingTargets: () => invoke<RecordingTargets>('recording_targets'),
+  recordingDevices: () => invoke<RecordingDevices>('recording_devices'),
+  recordingState: () => invoke<RecordingState>('recording_state'),
+  startRecording: (options: RecordingOptions) => invoke<void>('start_recording', { options }),
+  controlRecording: (action: 'stop' | 'pause' | 'resume') => invoke<void>('recording_control', { action }),
+  playRecording: (id: string) => invoke<void>('play_recording', { id }),
+  onOpenRecording: (fn: () => void) => listen('open-recording', fn),
+  onRecordingState: (fn: (state: RecordingState) => void) => listen<RecordingState>('recording-state', e => fn(e.payload)),
   state: () => invoke<ShelfState>('shelf_state'),
   shelf: (action: 'open' | 'collapse' | 'toggle' | 'enter' | 'leave' | 'interact' | 'hold' | 'release' | 'ready' | 'clearError', reveal?: number) => invoke<void>('shelf_action', { action, reveal }),
   capture: (kind: CaptureKind, direct = false) => invoke<void>('start_capture', { kind, direct }),
@@ -21,7 +41,7 @@ export const native = {
   startup: () => invoke<boolean>('get_startup'),
   setStartup: (enabled: boolean) => invoke<boolean>('set_startup', { enabled }),
   onSettingsChanged: (fn: (settings: Settings) => void) => listen<Settings>('settings-changed', e => fn(e.payload)),
-  list: (query = '', offset = 0, limit = 20, folderId: string | null = null, exportedOnly = false, imagesOnly = false) => invoke<LibraryPage>('list_captures', { query, offset, limit, folderId, exportedOnly, imagesOnly }),
+  list: (query = '', offset = 0, limit = 20, folderId: string | null = null, exportedOnly = false, imagesOnly = false, capturesOnly = false) => invoke<LibraryPage>('list_captures', { query, offset, limit, folderId, exportedOnly, imagesOnly, capturesOnly }),
   folders: () => invoke<Folder[]>('list_folders'),
   createFolder: (name: string) => invoke<Folder>('create_folder', { name }),
   renameFolder: (id: string, name: string) => invoke<void>('rename_folder', { id, name }),

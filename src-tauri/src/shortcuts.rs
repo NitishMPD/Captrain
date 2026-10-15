@@ -53,6 +53,7 @@ impl Default for Settings {
                 ("window", "Ctrl+Alt+2"),
                 ("screen", "Ctrl+Alt+3"),
                 ("url", "Ctrl+Alt+4"),
+                ("video", "Ctrl+Alt+5"),
                 ("toggle", "Ctrl+Alt+Space"),
             ]
             .into_iter()
@@ -71,17 +72,17 @@ pub fn validate(settings: &Settings) -> Result<BTreeMap<String, Shortcut>> {
         return Err("Choose the left or right edge.".into());
     }
     if !["system", "light", "dark"].contains(&settings.theme.as_str())
-        || settings.capture_kind == crate::library::Kind::Url
+        || !settings.capture_kind.is_image()
     {
         return Err("Choose a supported theme and screenshot type.".into());
     }
-    let expected = ["region", "window", "screen", "url", "toggle"];
-    if settings.shortcuts.len() != 5
+    let expected = ["region", "window", "screen", "url", "video", "toggle"];
+    if settings.shortcuts.len() != expected.len()
         || expected
             .iter()
             .any(|k| !settings.shortcuts.contains_key(*k))
     {
-        return Err("Five shortcut bindings are required.".into());
+        return Err("Six shortcut bindings are required.".into());
     }
     let mut ids = HashSet::new();
     settings
@@ -133,6 +134,29 @@ fn migrate(mut settings: Settings) -> Settings {
         .find(|s| !used.contains(&s.parse::<Shortcut>().unwrap().id()))
         .unwrap();
         settings.shortcuts.insert("url".into(), binding.into());
+    }
+    if settings.shortcuts.len() == 5
+        && ["region", "window", "screen", "url", "toggle"]
+            .iter()
+            .all(|k| settings.shortcuts.contains_key(*k))
+    {
+        let used: HashSet<_> = settings
+            .shortcuts
+            .values()
+            .filter_map(|s| s.parse::<Shortcut>().ok().map(|s| s.id()))
+            .collect();
+        let binding = [
+            "Ctrl+Alt+5",
+            "Ctrl+Alt+Shift+5",
+            "Ctrl+Alt+6",
+            "Ctrl+Alt+Shift+6",
+            "Ctrl+Alt+7",
+            "Ctrl+Alt+Shift+7",
+        ]
+        .into_iter()
+        .find(|s| !used.contains(&s.parse::<Shortcut>().unwrap().id()))
+        .unwrap();
+        settings.shortcuts.insert("video".into(), binding.into());
     }
     settings
 }
@@ -250,6 +274,7 @@ mod tests {
     fn legacy_shortcuts_gain_link_without_conflicting_with_custom_bindings() {
         let mut settings = Settings::default();
         settings.shortcuts.remove("url");
+        settings.shortcuts.remove("video");
         settings
             .shortcuts
             .insert("screen".into(), "Ctrl+Alt+4".into());
@@ -257,6 +282,23 @@ mod tests {
         assert_eq!(settings.shortcuts["screen"], "Ctrl+Alt+4");
         assert_ne!(settings.shortcuts["url"], "Ctrl+Alt+4");
         assert!(validate(&settings).is_ok());
+    }
+    #[test]
+    fn existing_shortcuts_gain_video_without_replacing_custom_bindings() {
+        let mut settings = Settings::default();
+        settings.shortcuts.remove("video");
+        settings
+            .shortcuts
+            .insert("region".into(), "Ctrl+Alt+5".into());
+        let old = settings.shortcuts.clone();
+        let settings = migrate(settings);
+        for (action, binding) in old {
+            assert_eq!(settings.shortcuts[&action], binding);
+        }
+        assert_ne!(settings.shortcuts["video"], "Ctrl+Alt+5");
+        assert!(validate(&settings).is_ok());
+        assert_eq!(migrate(settings.clone()).shortcuts, settings.shortcuts);
+        assert_eq!(Settings::default().shortcuts["video"], "Ctrl+Alt+5");
     }
     #[test]
     fn rejects_unknown_theme_and_url_as_screenshot_kind() {
