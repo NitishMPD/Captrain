@@ -166,6 +166,13 @@ export function Settings({ settings, onSaved, onBack }: Props) {
             </select>
           </div>
           {errors.display && <p className="field-error" role="alert">{errors.display}</p>}
+          <div className="field">
+            <span className="label" id="l-morph">Morph animation</span>
+            <button className="switch" role="switch" aria-checked={settings.morphAnimation} aria-labelledby="l-morph" disabled={busy}
+              onClick={() => apply('morphAnimation', () => native.updateSettings({ ...settings, morphAnimation: !settings.morphAnimation }))} />
+          </div>
+          <p className="note">Animate the bar opening into the shelf and closing back. Turn off to save resources.</p>
+          {errors.morphAnimation && <p className="field-error" role="alert">{errors.morphAnimation}</p>}
         </section>
 
         <section aria-labelledby="s-capture">
@@ -238,6 +245,7 @@ export function Settings({ settings, onSaved, onBack }: Props) {
             <div key={id}>
               <div className="field">
                 <span className="label" id={`k-${id}`}>{label}</span>
+                <button className="reset" disabled={busy} aria-label={`Reset ${label} shortcut`} onClick={() => { setRecording(null); void apply(id, () => native.defaults(id)); }}>Reset</button>
                 <button className={`keycap${recording === id ? ' recording' : ''}`} aria-labelledby={`k-${id}`} disabled={busy}
                   aria-description={recording === id ? 'Press the new shortcut, or Escape to cancel' : undefined}
                   onClick={() => { setHint(null); setRecording(recording === id ? null : id); setErrors(({ [id]: _, ...r }) => r); }}>
@@ -249,7 +257,7 @@ export function Settings({ settings, onSaved, onBack }: Props) {
             </div>
           ))}
           <p className="note" role="status">{recording ? 'Press the new combination. Esc cancels.' : 'Select a shortcut, then press the new combination.'}</p>
-          <button className="btn" disabled={busy} onClick={() => { setRecording(null); void apply('defaults', native.defaults); }}>Restore default shortcuts</button>
+          <button className="btn" disabled={busy} onClick={() => { setRecording(null); void apply('defaults', () => native.defaults()); }}>Restore default shortcuts</button>
           {errors.defaults && <p className="field-error" role="alert">{errors.defaults}</p>}
         </section>
       </main>

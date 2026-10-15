@@ -236,10 +236,20 @@ fn restore_shortcuts(
     window: WebviewWindow,
     app: AppHandle,
     state: tauri::State<Arc<AppState>>,
+    action: Option<String>,
 ) -> Result<shortcuts::Settings> {
     shelf_only(&window)?;
     let mut value = state.settings.lock().unwrap().value.clone();
-    value.shortcuts = shortcuts::Settings::default().shortcuts;
+    let defaults = shortcuts::Settings::default().shortcuts;
+    match action {
+        Some(id) => match defaults.get(&id) {
+            Some(default) => {
+                value.shortcuts.insert(id, default.clone());
+            }
+            None => return Err("Unknown shortcut.".into()),
+        },
+        None => value.shortcuts = defaults,
+    }
     shortcuts::update(&app, value)
 }
 #[derive(serde::Serialize)]

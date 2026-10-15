@@ -9,7 +9,7 @@ export interface Folder { id: string; name: string; path: string | null; count: 
 export interface Destinations { image: string | null; region: string | null; link: string | null; video: string | null; }
 export interface ViewerContext { id: string; query: string; folderId: string | null; exportedOnly: boolean; }
 export interface ShelfState { mode: Mode; hovered: boolean; error: string | null; reveal: number; }
-export interface Settings { edge: 'left' | 'right'; display: string | null; edgePosition: number; shortcutsOnly: boolean; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'video' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; destinations: Destinations; theme: 'system' | 'light' | 'dark'; }
+export interface Settings { edge: 'left' | 'right'; display: string | null; edgePosition: number; shortcutsOnly: boolean; morphAnimation: boolean; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'video' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; destinations: Destinations; theme: 'system' | 'light' | 'dark'; }
 export interface Display { id: string; name: string; }
 export interface LibraryPage { items: CaptureItem[]; total: number; }
 export interface OverlayData { kind: 'region' | 'window'; image: string | null; width: number; height: number; windows: { id: string; x: number; y: number; width: number; height: number }[]; }
@@ -67,7 +67,7 @@ export const native = {
   settings: () => invoke<Settings>('get_settings'),
   displays: () => invoke<Display[]>('list_displays'),
   updateSettings: (settings: Settings) => invoke<Settings>('update_settings', { settings }),
-  defaults: () => invoke<Settings>('restore_shortcuts'),
+  defaults: (action?: string) => invoke<Settings>('restore_shortcuts', { action }),
   recording: (active: boolean) => invoke<void>('record_shortcuts', { active }),
   onRecorded: (fn: (binding: string) => void) => listen<string>('shortcut-recorded', e => fn(e.payload)),
   overlay: () => invoke<OverlayData>('overlay_data'),

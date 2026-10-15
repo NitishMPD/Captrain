@@ -334,6 +334,10 @@ pub async fn drag_shelf(window: tauri::WebviewWindow, app: AppHandle) -> Result<
 }
 
 pub fn apply(app: &AppHandle, activate: bool) {
+    apply_inner(app, activate, true);
+}
+// `animate` holds an open window at full size while the page plays its close animation.
+fn apply_inner(app: &AppHandle, activate: bool, animate: bool) {
     let state = app.state::<Arc<AppState>>();
     let shelf = state.shelf.lock().unwrap();
     let view = shelf.view.clone();
@@ -396,6 +400,20 @@ pub fn apply(app: &AppHandle, activate: bool) {
         }
         .clamp(d.work.left, d.work.right - width);
         let y = edge_y(d.work.top, d.work.bottom, height, settings.edge_position);
+        if animate
+            && collapsed
+            && !settings.shortcuts_only
+            && settings.morph_animation
+            && window.is_visible().unwrap_or(false)
+            && window.outer_size().map_or(false, |s| s.width as i32 > width)
+        {
+            let app3 = app2.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(270));
+                apply_inner(&app3, false, false);
+            });
+            return;
+        }
         let _ = window.set_size(PhysicalSize::new(width as u32, height as u32));
         let _ = window.set_position(PhysicalPosition::new(x, y));
         if let Ok(handle) = window.hwnd() {

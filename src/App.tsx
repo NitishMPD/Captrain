@@ -29,10 +29,13 @@ export function App() {
   const [rev, setRev] = useState(0);
   const [freshId, setFreshId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
   const mode = useRef(shelf.mode);
   const reveal = useRef(shelf.reveal);
   const awaitingItem = useRef(false);
   const dragging = useRef(false);
+  const morph = useRef(true);
+  morph.current = settings?.morphAnimation !== false;
 
   const armTimer = useCallback(() => {
     const generation = reveal.current;
@@ -59,6 +62,8 @@ export function App() {
           mode.current = s.mode;
           reveal.current = s.reveal;
           setShelf(s);
+          // Native keeps the window open for the close animation (shelf_window::apply).
+          setClosing(morph.current && s.mode === 'collapsed' && (previous === 'manual' || previous === 'temporary'));
           if (s.mode === 'temporary' && previous !== 'temporary' && !awaitingItem.current) armTimer();
         }),
         native.onCapture(item => {
@@ -95,12 +100,12 @@ export function App() {
 
   // A collapsed shelf always reopens on the newest captures with no filters.
   useEffect(() => {
-    if (shelf.mode !== 'collapsed') return;
+    if (shelf.mode !== 'collapsed' || closing) return;
     setView('shelf');
     setFilters(NO_FILTERS);
     setLimit(PAGE);
     setFreshId(null);
-  }, [shelf.mode]);
+  }, [shelf.mode, closing]);
 
   // The window is shown without activation; give the page keyboard focus so Escape reaches it.
   useEffect(() => { if (shelf.mode === 'manual') window.focus(); }, [shelf.mode]);
@@ -129,6 +134,7 @@ export function App() {
   const edge = settings?.edge ?? 'right';
   const root = {
     className: `root ${edge}`,
+    'data-morph': morph.current,
     'data-mode': shelf.mode,
     onPointerEnter: () => quiet(native.shelf('enter')),
     onPointerLeave: () => quiet(native.shelf('leave')),
@@ -153,7 +159,7 @@ export function App() {
     );
   }
 
-  if (shelf.mode === 'collapsed') {
+  if (shelf.mode === 'collapsed' && !closing) {
     return (
       <div {...root}>
         <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} title="Click to open; drag to move along either screen edge. Arrow keys adjust height."
@@ -180,7 +186,7 @@ export function App() {
 
   return (
     <div {...root} onPointerDownCapture={() => { if (shelf.mode === 'temporary') quiet(native.shelf('interact')); }}>
-      <section className="panel" aria-label="Captrain shelf">
+      <section className={closing ? 'panel closing' : 'panel'} aria-label="Captrain shelf" onAnimationEnd={e => { if (closing && e.target === e.currentTarget) setClosing(false); }}>
         {recordingActive && <RecordingStatus state={recording} onError={setNotice} />}
         {view === 'shelf' && ['available', 'downloaded'].includes(update.status) && (
           <div className="banner" role="status">

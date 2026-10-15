@@ -21,6 +21,8 @@ pub struct Settings {
     pub edge_position: f64,
     #[serde(default)]
     pub shortcuts_only: bool,
+    #[serde(default = "instant_default")]
+    pub morph_animation: bool,
     pub shortcuts: BTreeMap<String, String>,
     #[serde(default)]
     pub capture_folder: Option<std::path::PathBuf>,
@@ -92,6 +94,7 @@ impl Default for Settings {
             display: None,
             edge_position: edge_position_default(),
             shortcuts_only: false,
+            morph_animation: true,
             capture_folder: None,
             instant_capture: true,
             capture_kind: crate::library::Kind::Region,
@@ -373,6 +376,7 @@ mod tests {
         for field in [
             "edgePosition",
             "shortcutsOnly",
+            "morphAnimation",
             "captureFolder",
             "instantCapture",
             "captureKind",
@@ -385,6 +389,7 @@ mod tests {
         let loaded: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(loaded.edge_position, 0.5);
         assert!(!loaded.shortcuts_only);
+        assert!(loaded.morph_animation);
         assert!(loaded.instant_capture);
         assert_eq!(loaded.capture_kind, crate::library::Kind::Region);
         assert!(loaded.capture_folder.is_none());
