@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/captrain.svg" alt="Captrain logo" width="128" height="128">
+</p>
+
 # Captrain
 
 A Windows capture utility that lives on the edge of the screen. Click the bar to open your shelf, or capture from another application with a global shortcut. A committed capture reveals the shelf for three seconds without activating it. Hover pauses dismissal; clicking inside keeps it open.

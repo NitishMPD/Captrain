@@ -36,10 +36,10 @@ export function ConfirmDialog({ title, body, confirm, busy, hold, onConfirm, onC
   );
 }
 
-interface NameProps { title: string; initial?: string; submit: string; onSubmit: (name: string) => Promise<void>; onCancel: () => void }
+interface NameProps { label?: string; maxLength?: number; title: string; initial?: string; submit: string; onSubmit: (name: string) => Promise<void>; onCancel: () => void }
 
-/** Single-field form for naming or renaming a folder. */
-export function NameDialog({ title, initial = '', submit, onSubmit, onCancel }: NameProps) {
+/** Single-field form for naming folders and saved links. */
+export function NameDialog({ title, label = 'Folder name', maxLength = 40, initial = '', submit, onSubmit, onCancel }: NameProps) {
   const [name, setName] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,8 +56,8 @@ export function NameDialog({ title, initial = '', submit, onSubmit, onCancel }: 
     <Scrim onCancel={onCancel}>
       <form className="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" onSubmit={send}>
         <h2 id="dlg-title">{title}</h2>
-        <input className="search name" autoFocus value={name} maxLength={40} aria-label="Folder name" aria-invalid={error !== null}
-          aria-describedby={error ? 'dlg-error' : undefined} placeholder="Folder name"
+        <input className="search name" autoFocus value={name} maxLength={maxLength} aria-label={label} aria-invalid={error !== null}
+          aria-describedby={error ? 'dlg-error' : undefined} placeholder={label}
           onChange={e => { setName(e.target.value); setError(null); }} onFocus={e => e.currentTarget.select()} />
         {error && <p id="dlg-error" className="field-error" role="alert">{error}</p>}
         <div className="dialog-actions">

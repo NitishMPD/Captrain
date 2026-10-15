@@ -37,3 +37,21 @@
 - Corrected the capture menu label to Video and added its shortcut hint in both menus. Added configurable Ctrl+Alt+5 to Settings and the native global shortcut handler; it opens setup or existing recording controls without starting devices.
 - Migrated four- and five-action settings without replacing custom bindings, choosing a free fallback when needed.
 - Verified TypeScript and 13 focused tests (8 frontend, 5 native), including legacy settings, custom binding collisions and migration idempotence. No app build; real Windows shortcut input remains unverified.
+
+
+## Movable edge bar and shortcuts-only tray mode
+
+- Added native dragging of the collapsed bar along either side edge and across monitors. Persisted its display, side and normalized height; preserved click-to-open and added arrow-key height adjustment. Placement respects per-monitor DPI, negative monitor coordinates and work-area bounds; the existing primary-display fallback handles disconnected displays.
+- Added the checked tray option ?Shortcuts only (hide edge bar)?. Existing shortcuts remain registered, the collapsed bar stays hidden, and screenshot/link/finalized recording completion uses a compact Captrain desktop toast with Open shelf and Dismiss. Errors and automatic-export warnings stay visible. Toasts reuse the native reveal deadline and hover pause; tray and shortcut access to the full shelf and recording controls remain available.
+- Preserved legacy settings defaults and shortcut conflict handling, and synchronized tray/drag settings changes into React. Updated design.md. No dependencies, branches, pushes or deployment.
+- Verification: TypeScript typecheck, all 32 frontend tests and git diff whitespace checks passed. Rustfmt parsed the changed native sources. Added native regression cases for placement/clamping, negative coordinates, mixed DPI, shortcuts-only completion/cancellation/error transitions, settings migration and invalid positions.
+- Not run: native compilation/tests, application/installer builds or real Windows interaction. Run `cargo test --manifest-path src-tauri/Cargo.toml` for native regression coverage, then `npm run package:windows` to produce the updated installer. Multi-monitor dragging, actual tray clicks, toast focus and recording interactions still need native acceptance checks.
+
+
+## Windows folder links and link renaming
+
+- Extended Link / Ctrl+Alt+4 to save the active filesystem folder from File Explorer, including drive and UNC paths. Native Shell automation matches the foreground Explorer window and active tab; unsupported virtual locations and ambiguous reads fail visibly without saving an item. Browser capture retains its HTTP/HTTPS validation.
+- Reused link items and .url shortcut storage/export. Windows targets display and copy as decoded paths and open in Explorer. Their source folders are never copied or deleted; missing/offline targets remain in saved history. Enabled Ole/Variant APIs on the existing Windows crate; added no dependency.
+- Added Rename for web and folder links using the existing naming dialog with a link-specific label. Optional searchable display names persist atomically without changing targets, private filenames or existing exports; legacy items without names keep their automatic label. Updated design.md and shortcut help.
+- Verification: TypeScript typecheck, all 35 frontend tests and git diff whitespace checks passed. Rustfmt parsed the native changes. Added native regression tests for path validation/copy text, persistence/search, legacy name defaults, failed-rename rollback, target-preserving deletion and an opt-in live Explorer capture check.
+- Not run: native compilation/tests, builds or live Explorer/tray interaction. Run `cargo test --manifest-path src-tauri/Cargo.toml` for native coverage, then verify Link with single/multiple Explorer tabs and unavailable network shares. No branch, push or deployment.

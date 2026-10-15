@@ -14,6 +14,14 @@ use windows::{
 };
 
 pub type Result<T> = std::result::Result<T, String>;
+fn valid_link_title(value: &str) -> Result<String> {
+    let title = value.trim();
+    if title.is_empty() || title.chars().count() > 120 || value.chars().any(char::is_control) {
+        return Err("Use a link name of 1 to 120 characters without control characters.".into());
+    }
+    Ok(title.to_string())
+}
+
 pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -64,6 +72,8 @@ pub struct Item {
     pub exported_path: Option<PathBuf>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Folder {
@@ -197,7 +207,11 @@ impl Library {
         if !directory.is_dir() || directory.starts_with(self.root.canonicalize().map_err(err)?) {
             return Err("Choose an existing folder outside Captrain's private library.".into());
         }
-        if self.folders.iter().any(|f| f.path.as_deref() == Some(&directory)) {
+        if self
+            .folders
+            .iter()
+            .any(|f| f.path.as_deref() == Some(&directory))
+        {
             return Err("That PC folder is already added.".into());
         }
         let base = directory
@@ -205,7 +219,11 @@ impl Library {
             .map_or("Folder".into(), |n| n.to_string_lossy().into_owned());
         let mut name = base.clone();
         let mut n = 1;
-        while self.folders.iter().any(|f| f.name.to_lowercase() == name.to_lowercase()) {
+        while self
+            .folders
+            .iter()
+            .any(|f| f.name.to_lowercase() == name.to_lowercase())
+        {
             n += 1;
             name = format!("{base} ({n})");
         }
@@ -373,10 +391,13 @@ impl Library {
                     Ok(index)
                         if index.items.iter().all(|i| {
                             Uuid::parse_str(&i.id).is_ok()
+                                && i.title
+                                    .as_ref()
+                                    .is_none_or(|title| valid_link_title(title).is_ok())
                                 && if i.kind == Kind::Url {
                                     i.url
                                         .as_deref()
-                                        .is_some_and(|u| crate::links::validate_url(u).is_ok())
+                                        .is_some_and(|u| crate::links::validate_link(u).is_ok())
                                 } else {
                                     i.width > 0 && i.height > 0 && i.url.is_none()
                                 }
@@ -489,12 +510,17 @@ impl Library {
                     .map(|d| d.with_timezone(&Local).format("%x %B %e %Y").to_string())
                     .unwrap_or_default();
                 let searchable = format!(
-                    "{} {} {} {} {}",
+                    "{} {} {} {} {} {} {}",
                     i.kind.name(),
                     i.created_at,
                     date,
                     i.filename,
-                    i.url.as_deref().unwrap_or("")
+                    i.url.as_deref().unwrap_or(""),
+                    i.title.as_deref().unwrap_or(""),
+                    i.url
+                        .as_deref()
+                        .and_then(|url| crate::links::link_text(url).ok())
+                        .unwrap_or_default()
                 )
                 .to_lowercase();
                 terms.iter().all(|term| searchable.contains(term))
@@ -573,6 +599,7 @@ impl Library {
             folder_id: folder.map(String::from),
             exported_path: None,
             url: None,
+            title: None,
         };
         let original = self.path(&item, false);
         let thumb = self.path(&item, true);
@@ -639,6 +666,7 @@ impl Library {
             folder_id: folder.map(String::from),
             exported_path: None,
             url: None,
+            title: None,
         };
         let path = self.path(&item, false);
         if fs::metadata(&path).map_err(err)?.len() == 0 {
@@ -657,7 +685,7 @@ impl Library {
         Ok(item)
     }
     pub fn commit_url(&mut self, url: &str, folder: Option<&str>) -> Result<Item> {
-        let url = crate::links::validate_url(url)?;
+        let url = crate::links::validate_link(url)?;
         if !self.writable {
             return Err("Capture index needs recovery; existing data was left untouched.".into());
         }
@@ -673,6 +701,7 @@ impl Library {
             folder_id: folder.map(String::from),
             exported_path: None,
             url: Some(url.clone()),
+            title: None,
         };
         let path = self.path(&item, false);
         atomic_write(
@@ -687,8 +716,26 @@ impl Library {
         }
         Ok(item)
     }
+    pub fn rename_link(&mut self, id: &str, title: &str) -> Result<()> {
+        if !self.writable {
+            return Err("Capture index needs recovery.".into());
+        }
+        self.url(id)?;
+        let title = valid_link_title(title)?;
+        let index = self
+            .items
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or("Link not found.")?;
+        let previous = self.items[index].title.replace(title);
+        if let Err(error) = self.persist() {
+            self.items[index].title = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
     pub fn url(&self, id: &str) -> Result<String> {
-        crate::links::validate_url(
+        crate::links::validate_link(
             self.find(id)?
                 .url
                 .as_deref()
@@ -702,7 +749,7 @@ impl Library {
         if let Some(url) = &self.find(id)?.url {
             return arboard::Clipboard::new()
                 .map_err(err)?
-                .set_text(crate::links::validate_url(url)?)
+                .set_text(crate::links::link_text(url)?)
                 .map_err(err);
         }
         let image = image::open(self.path(self.find(id)?, false))
@@ -853,6 +900,62 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn folder_links_and_renamed_titles_preserve_the_target() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let target = root.join("My Projects");
+        fs::create_dir_all(&target).unwrap();
+        let url = tauri::Url::from_directory_path(&target)
+            .unwrap()
+            .to_string();
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library.commit_url(&url, None).unwrap();
+        library.rename_link(&item.id, "Game source").unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        assert_eq!(
+            library.get(&item.id).unwrap().title.as_deref(),
+            Some("Game source")
+        );
+        assert_eq!(library.list("game source", 0, 20).total, 1);
+        assert_eq!(library.list(target.to_str().unwrap(), 0, 20).total, 1);
+        assert_eq!(library.url(&item.id).unwrap(), url);
+        for invalid in ["", "  ", "bad\nname"] {
+            assert!(library.rename_link(&item.id, invalid).is_err());
+        }
+        assert!(library.rename_link(&item.id, &"a".repeat(121)).is_err());
+        fs::rename(root.join("index.json"), root.join("held-index")).unwrap();
+        fs::create_dir(root.join("index.json")).unwrap();
+        assert!(library.rename_link(&item.id, "Cannot persist").is_err());
+        assert_eq!(
+            library.get(&item.id).unwrap().title.as_deref(),
+            Some("Game source")
+        );
+        fs::remove_dir(root.join("index.json")).unwrap();
+        fs::rename(root.join("held-index"), root.join("index.json")).unwrap();
+        library.delete(&item.id).unwrap();
+        assert!(target.is_dir());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn web_link_names_survive_reload_and_legacy_items_need_no_migration() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library.commit_url("https://example.com/", None).unwrap();
+        let mut index: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join("index.json")).unwrap()).unwrap();
+        index["items"][0].as_object_mut().unwrap().remove("title");
+        fs::write(root.join("index.json"), serde_json::to_vec(&index).unwrap()).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        assert!(library.get(&item.id).unwrap().title.is_none());
+        library.rename_link(&item.id, "Reference").unwrap();
+        let library = Library::open(root.clone()).unwrap();
+        assert_eq!(
+            library.get(&item.id).unwrap().title.as_deref(),
+            Some("Reference")
+        );
+        assert_eq!(library.url(&item.id).unwrap(), "https://example.com/");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn permanent_folder_saves_to_its_own_directory() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let pc = std::env::temp_dir().join(Uuid::new_v4().to_string());
@@ -862,9 +965,17 @@ mod tests {
         let temp = library.create_folder("Temp").unwrap();
         let perm = library.create_permanent_folder(&pc).unwrap();
         assert!(library.create_permanent_folder(&pc).is_err());
-        assert!(library.create_permanent_folder(&root.join("captures")).is_err());
-        assert_eq!(library.export_dir(Some(&perm.id), Some(&fallback)), Some(pc.canonicalize().unwrap()));
-        assert_eq!(library.export_dir(Some(&temp.id), Some(&fallback)), Some(fallback.clone()));
+        assert!(library
+            .create_permanent_folder(&root.join("captures"))
+            .is_err());
+        assert_eq!(
+            library.export_dir(Some(&perm.id), Some(&fallback)),
+            Some(pc.canonicalize().unwrap())
+        );
+        assert_eq!(
+            library.export_dir(Some(&temp.id), Some(&fallback)),
+            Some(fallback.clone())
+        );
         assert_eq!(library.export_dir(None, None), None);
         let reopened = Library::open(root.clone()).unwrap();
         assert!(reopened.folders().iter().any(|f| f.path.is_some()));
@@ -1004,6 +1115,7 @@ mod tests {
                 folder_id: None,
                 exported_path: None,
                 url: None,
+                title: None,
             });
         }
         let page = l.list("screen", 20, 20);

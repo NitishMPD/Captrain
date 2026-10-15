@@ -122,5 +122,11 @@ export function useContextMenu() {
     open(items, r.left, r.top, true, button);
   };
 
-  return { menu: anchor && <Menu anchor={anchor} onClose={onClose} />, isOpen: anchor !== null, bind, openAbove };
+  /** Popover anchored below a button. */
+  const openBelow = (items: MenuItem[], button: HTMLElement) => {
+    const r = button.getBoundingClientRect();
+    open(items, r.left, r.bottom + 4, false, button);
+  };
+
+  return { menu: anchor && <Menu anchor={anchor} onClose={onClose} />, isOpen: anchor !== null, bind, openAbove, openBelow };
 }

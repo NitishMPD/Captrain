@@ -3,7 +3,7 @@ import type { CaptureItem } from '../native';
 import { loadRange, locate, MAX_PAGE, type FetchPage } from './paging';
 
 const make = (n: number): CaptureItem[] => Array.from({ length: n }, (_, i) => ({
-  id: `c${i}`, kind: 'region', url: null, createdAt: '2026-01-01T00:00:00Z', width: 1, height: 1, filename: `c${i}.png`, folderId: null, exportedPath: null,
+  id: `c${i}`, kind: 'region', url: null, title: null, createdAt: '2026-01-01T00:00:00Z', width: 1, height: 1, filename: `c${i}.png`, folderId: null, exportedPath: null,
 }));
 
 /** Mimics native: limit is clamped to 100. */

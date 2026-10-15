@@ -99,7 +99,8 @@ kbd { font: inherit; font-size: 12px; color: var(--muted); background: var(--sur
 /* A paper-folder: tab on the top-left and a sheet peeking out behind a tinted front. */
 .folder { --hue: #c78a3a; --front: color-mix(in srgb, var(--hue) var(--tint-mix), var(--card)); --edge: color-mix(in srgb, var(--hue) 34%, var(--border)); position: relative; isolation: isolate; display: flex; flex-direction: column; gap: 2px; width: 138px; height: 92px; padding: 12px 14px; text-align: left; justify-content: flex-end; border: 1px solid var(--edge); border-radius: 0 14px 14px 14px; background: linear-gradient(180deg, var(--front), color-mix(in srgb, var(--hue) calc(var(--tint-mix) * 0.5), var(--card))); transition: transform var(--ease), box-shadow var(--ease); }
 .folder::before { content: ""; position: absolute; z-index: 1; left: -1px; bottom: calc(100% - 1px); width: 52px; height: 11px; border: 1px solid var(--edge); border-bottom: 0; border-radius: 8px 8px 0 0; background: var(--front); }
-.folder::after { content: ""; position: absolute; z-index: -1; left: 14px; right: 12px; bottom: calc(100% - 4px); height: 12px; border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--card); }
+/* A sheet of paper tucked behind the front, peeking out beside the tab once the folder holds files. */
+.folder::after { content: ""; position: absolute; z-index: -1; left: 60px; right: 16px; bottom: calc(100% - 6px); height: 12px; border: 1px solid var(--edge); border-bottom: 0; border-radius: 5px 5px 0 0; background: color-mix(in srgb, var(--text) 10%, var(--card)); transform: rotate(-2deg); transform-origin: bottom left; }
 .folder[data-empty="true"]::after { display: none; }
 .folder[data-over="true"] { transform: translateY(-2px) scale(1.03); box-shadow: 0 0 0 2px var(--hue); }
 .folder:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(40, 36, 30, 0.14); }
@@ -116,6 +117,11 @@ kbd { font: inherit; font-size: 12px; color: var(--muted); background: var(--sur
 .folder-row .folder-icon { position: static; flex: none; width: 44px; height: 44px; }
 .folder-row[aria-pressed="true"] { background: var(--surface-2); box-shadow: inset 0 0 0 2px var(--hue); }
 .folder-row[data-over="true"] { background: var(--surface-2); box-shadow: inset 0 0 0 2px var(--hue); }
+.drag-ghost { position: fixed; left: -1000px; top: 0; display: flex; align-items: center; gap: 10px; max-width: 240px; padding: 6px 12px 6px 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); box-shadow: 0 6px 16px rgba(30, 26, 20, 0.2); }
+.drag-ghost .thumb { width: 36px; height: 36px; border-radius: 8px; }
+.drag-ghost .thumb > .icon { width: 20px; height: 20px; }
+.drag-ghost .badge { display: none; }
+.drag-ghost strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .folder-empty { display: flex; align-items: center; justify-content: center; gap: 8px; height: 64px; margin: 2px 16px 12px; border: 1px dashed var(--border); border-radius: 14px; background: transparent; color: var(--muted); }
 .folder-empty:hover { background: var(--surface-2); color: var(--text); }
 

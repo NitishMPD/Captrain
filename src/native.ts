@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 
 export type CaptureKind = 'region' | 'window' | 'screen';
 export type Mode = 'collapsed' | 'temporary' | 'manual' | 'capturing';
-export interface CaptureItem { id: string; kind: CaptureKind | 'url' | 'video'; url: string | null; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
+export interface CaptureItem { id: string; kind: CaptureKind | 'url' | 'video'; url: string | null; title: string | null; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
 /** `path` is set for a permanent folder: captures filed here are also saved into that PC directory. */
 export interface Folder { id: string; name: string; path: string | null; count: number; }
 export interface Destinations { image: string | null; region: string | null; link: string | null; video: string | null; }
@@ -40,6 +40,7 @@ export const native = {
   shelf: (action: 'open' | 'collapse' | 'toggle' | 'enter' | 'leave' | 'interact' | 'hold' | 'release' | 'ready' | 'clearError', reveal?: number) => invoke<void>('shelf_action', { action, reveal }),
   capture: (kind: CaptureKind, direct = false) => invoke<void>('start_capture', { kind, direct }),
   saveLink: () => invoke<void>('save_link'),
+  renameLink: (id: string, title: string) => invoke<void>('rename_link', { id, title }),
   openLink: (id: string) => invoke<void>('open_link', { id }),
   startup: () => invoke<boolean>('get_startup'),
   setStartup: (enabled: boolean) => invoke<boolean>('set_startup', { enabled }),
@@ -53,6 +54,8 @@ export const native = {
   moveCapture: (id: string, folderId: string | null) => invoke<void>('move_capture', { id, folderId }),
   chooseCaptureFolder: () => invoke<Settings>('choose_capture_folder'),
   openCaptureFolder: () => invoke<void>('open_capture_folder'),
+  reveal: (id: string) => invoke<void>('reveal_capture', { id }),
+  openFolder: (id: string) => invoke<void>('open_folder', { id }),
   storagePath: () => invoke<string>('storage_path'),
   openViewer: (id: string, query = '', folderId: string | null = null, exportedOnly = false) => invoke<void>('open_viewer', { id, query, folderId, exportedOnly }),
   viewerContext: () => invoke<ViewerContext>('viewer_context'),

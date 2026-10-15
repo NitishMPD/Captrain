@@ -176,6 +176,59 @@ pub fn open_capture_folder(
     Ok(())
 }
 
+#[tauri::command]
+pub fn reveal_capture(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    id: String,
+) -> Result<()> {
+    content_only(&window)?;
+    let path = {
+        let library = state.library.lock().unwrap();
+        let (stored, _) = library.export_source(&id)?;
+        // Prefer the copy the user saved on their PC; fall back to Captrain's own file.
+        library
+            .get(&id)
+            .and_then(|i| i.exported_path.clone())
+            .filter(|p| p.is_file())
+            .unwrap_or(stored)
+    };
+    if !path.is_file() {
+        return Err("This file is no longer on disk.".into());
+    }
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("explorer.exe")
+        .raw_arg(format!("/select,\"{}\"", path.display()))
+        .spawn()
+        .map_err(err)?;
+    Ok(())
+}
+#[tauri::command]
+pub fn open_folder(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    id: String,
+) -> Result<()> {
+    content_only(&window)?;
+    let directory = state
+        .library
+        .lock()
+        .unwrap()
+        .folders()
+        .into_iter()
+        .find(|f| f.id == id)
+        .and_then(|f| f.path)
+        .ok_or("This folder is not on your PC.")?;
+    if !directory.is_dir() {
+        return Err("The folder is unavailable.".into());
+    }
+    std::process::Command::new("explorer.exe")
+        .arg(directory)
+        .spawn()
+        .map_err(err)?;
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewerContext {

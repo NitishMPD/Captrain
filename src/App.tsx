@@ -53,7 +53,6 @@ export function App() {
     const unlisten: (() => void)[] = [];
     (async () => {
       const [offState, offCapture, offLibrary, offRecording, offSettings] = await Promise.all([
-        native.onSettingsChanged(setSettings),
         native.onOpenRecording(() => setView('recording')),
         native.onState(s => {
           const previous = mode.current;
@@ -75,6 +74,7 @@ export function App() {
           setRev(r => r + 1);
           native.settings().then(s => { if (!disposed) setSettings(s); }).catch(() => {});
         }),
+        native.onSettingsChanged(setSettings),
       ]);
       if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); offSettings(); return; }
       unlisten.push(offState, offCapture, offLibrary, offRecording, offSettings);
@@ -156,14 +156,20 @@ export function App() {
   if (shelf.mode === 'collapsed') {
     return (
       <div {...root}>
-        <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} title="Click to open; drag to move along either screen edge"
+        <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} title="Click to open; drag to move along either screen edge. Arrow keys adjust height."
           onPointerDown={async e => {
             if (e.button !== 0 || dragging.current) return;
             e.preventDefault();
+            if (recordingActive) { quiet(native.shelf('open')); return; }
             dragging.current = true;
             try { if (!await native.dragShelf()) await native.shelf('open'); }
             catch (error) { setNotice(errorMessage(error)); quiet(native.shelf('open')); }
             finally { dragging.current = false; }
+          }}
+          onKeyDown={e => {
+            if (!settings || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+            e.preventDefault();
+            patch({ edgePosition: Math.max(0, Math.min(1, settings.edgePosition + (e.key === 'ArrowUp' ? -0.05 : 0.05))) });
           }}
           onClick={e => { if (e.detail === 0) quiet(native.shelf('open')); }}>
           <span className="bar-line" />

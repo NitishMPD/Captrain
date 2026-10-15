@@ -16,7 +16,7 @@ const ACTIONS: { id: Action; label: string }[] = [
   { id: 'region', label: 'Capture region' },
   { id: 'window', label: 'Capture window' },
   { id: 'screen', label: 'Capture screen' },
-  { id: 'url', label: 'Save browser link' },
+  { id: 'url', label: 'Save link or folder' },
   { id: 'video', label: 'Video' },
   { id: 'toggle', label: 'Toggle shelf' },
 ];
@@ -233,7 +233,7 @@ export function Settings({ settings, onSaved, onBack }: Props) {
 
         <section aria-labelledby="s-keys">
           <h2 id="s-keys">Shortcuts</h2>
-          <p className="note">Save browser link reads the address bar in Chrome, Edge or Brave without changing your clipboard. Only HTTP and HTTPS pages are supported.</p>
+          <p className="note">Save link or folder reads the active page in Chrome, Edge or Brave, or the active File Explorer folder, without changing your clipboard. Home and This PC are not folder paths.</p>
           {ACTIONS.map(({ id, label }) => (
             <div key={id}>
               <div className="field">

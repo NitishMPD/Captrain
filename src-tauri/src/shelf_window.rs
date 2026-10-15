@@ -139,7 +139,13 @@ impl Shelf {
         self.deadline = None;
         self.view.hovered = false;
     }
-    pub fn finish(&mut self, committed: bool, error: Option<String>, now: Instant, shortcuts_only: bool) {
+    pub fn finish(
+        &mut self,
+        committed: bool,
+        error: Option<String>,
+        now: Instant,
+        shortcuts_only: bool,
+    ) {
         self.view.mode = if shortcuts_only && (committed || error.is_some()) {
             Mode::Temporary
         } else if self.previous == Mode::Manual {
@@ -216,11 +222,22 @@ fn edge_y(top: i32, bottom: i32, height: i32, position: f64) -> i32 {
     top + ((bottom - top - height).max(0) as f64 * position.clamp(0.0, 1.0)).round() as i32
 }
 
-fn drag_position(work: &windows::Win32::Foundation::RECT, scale: f64, point: POINT, grab: f64) -> (&'static str, f64) {
-    let edge = if point.x - work.left < work.right - point.x { "left" } else { "right" };
+fn drag_position(
+    work: &windows::Win32::Foundation::RECT,
+    scale: f64,
+    point: POINT,
+    grab: f64,
+) -> (&'static str, f64) {
+    let edge = if point.x - work.left < work.right - point.x {
+        "left"
+    } else {
+        "right"
+    };
     let height = (72.0 * scale) as i32;
     let travel = (work.bottom - work.top - height).max(0);
-    let position = if travel == 0 { 0.5 } else {
+    let position = if travel == 0 {
+        0.5
+    } else {
         ((point.y - work.top) as f64 - height as f64 * grab) / travel as f64
     };
     (edge, position.clamp(0.0, 1.0))
@@ -233,17 +250,23 @@ pub async fn drag_shelf(window: tauri::WebviewWindow, app: AppHandle) -> Result<
         use std::sync::atomic::Ordering;
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
         let state = app.state::<Arc<AppState>>();
-        state.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        state
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "Finish the current operation before moving the bar.".to_string())?;
         let result = (|| {
             {
                 let mut shelf = state.shelf.lock().unwrap();
-                if shelf.view.mode != Mode::Collapsed { return Ok(false); }
+                if shelf.view.mode != Mode::Collapsed {
+                    return Ok(false);
+                }
                 shelf.dragging = true;
             }
             let all = displays()?;
             let mut start = POINT::default();
-            unsafe { GetCursorPos(&mut start).map_err(err)?; }
+            unsafe {
+                GetCursorPos(&mut start).map_err(err)?;
+            }
             let origin = window.outer_position().map_err(err)?;
             let size = window.outer_size().map_err(err)?;
             let grab = ((start.y - origin.y) as f64 / size.height.max(1) as f64).clamp(0.0, 1.0);
@@ -251,19 +274,41 @@ pub async fn drag_shelf(window: tauri::WebviewWindow, app: AppHandle) -> Result<
             let mut target = None;
             while unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
                 let mut point = POINT::default();
-                unsafe { GetCursorPos(&mut point).map_err(err)?; }
-                if target.is_some() || ((point.x - start.x) as f64).hypot((point.y - start.y) as f64) >= threshold {
-                    let display = all.iter().min_by_key(|d| {
-                        let x = (point.x as i64 - point.x.clamp(d.bounds.left, d.bounds.right) as i64).abs();
-                        let y = (point.y as i64 - point.y.clamp(d.bounds.top, d.bounds.bottom) as i64).abs();
-                        x * x + y * y
-                    }).ok_or("No display is available.")?;
+                unsafe {
+                    GetCursorPos(&mut point).map_err(err)?;
+                }
+                if target.is_some()
+                    || ((point.x - start.x) as f64).hypot((point.y - start.y) as f64) >= threshold
+                {
+                    let display = all
+                        .iter()
+                        .min_by_key(|d| {
+                            let x = (point.x as i64
+                                - point.x.clamp(d.bounds.left, d.bounds.right) as i64)
+                                .abs();
+                            let y = (point.y as i64
+                                - point.y.clamp(d.bounds.top, d.bounds.bottom) as i64)
+                                .abs();
+                            x * x + y * y
+                        })
+                        .ok_or("No display is available.")?;
                     let (edge, position) = drag_position(&display.work, display.scale, point, grab);
                     let width = (16.0 * display.scale) as i32;
                     let height = (72.0 * display.scale) as i32;
-                    let x = if edge == "left" { display.work.left } else { display.work.right - width };
-                    window.set_size(PhysicalSize::new(width as u32, height as u32)).map_err(err)?;
-                    window.set_position(PhysicalPosition::new(x, edge_y(display.work.top, display.work.bottom, height, position))).map_err(err)?;
+                    let x = if edge == "left" {
+                        display.work.left
+                    } else {
+                        display.work.right - width
+                    };
+                    window
+                        .set_size(PhysicalSize::new(width as u32, height as u32))
+                        .map_err(err)?;
+                    window
+                        .set_position(PhysicalPosition::new(
+                            x,
+                            edge_y(display.work.top, display.work.bottom, height, position),
+                        ))
+                        .map_err(err)?;
                     target = Some((display.id.clone(), edge.to_string(), position));
                 }
                 std::thread::sleep(Duration::from_millis(16));
@@ -283,7 +328,9 @@ pub async fn drag_shelf(window: tauri::WebviewWindow, app: AppHandle) -> Result<
         state.busy.store(false, Ordering::Release);
         apply(&app, false);
         result
-    }).await.map_err(err)?
+    })
+    .await
+    .map_err(err)?
 }
 
 pub fn apply(app: &AppHandle, activate: bool) {
@@ -464,13 +511,28 @@ mod tests {
     #[test]
     fn edge_placement_clamps_to_work_area_and_handles_negative_monitors() {
         use windows::Win32::Foundation::RECT;
-        let work = RECT { left: -1920, top: -200, right: 0, bottom: 880 };
+        let work = RECT {
+            left: -1920,
+            top: -200,
+            right: 0,
+            bottom: 880,
+        };
         assert_eq!(edge_y(-200, 880, 72, 0.0), -200);
         assert_eq!(edge_y(-200, 880, 72, 1.0), 808);
         assert_eq!(edge_y(-200, 880, 740, 0.5), -30);
         assert_eq!(edge_y(0, 50, 72, 1.0), 0);
-        assert_eq!(drag_position(&work, 1.0, POINT { x: -1910, y: -500 }, 0.5), ("left", 0.0));
-        assert_eq!(drag_position(&work, 1.5, POINT { x: -10, y: 1000 }, 0.5), ("right", 1.0));
+        assert_eq!(
+            drag_position(&work, 1.0, POINT { x: -1910, y: -500 }, 0.5),
+            ("left", 0.0)
+        );
+        assert_eq!(
+            drag_position(&work, 1.5, POINT { x: -10, y: 1000 }, 0.5),
+            ("right", 1.0)
+        );
+        assert_eq!(
+            drag_position(&work, 1.5, POINT { x: -10, y: 340 }, 0.5),
+            ("right", 0.5)
+        );
     }
     #[test]
     fn shortcuts_only_capture_uses_temporary_toast_even_after_manual_open() {

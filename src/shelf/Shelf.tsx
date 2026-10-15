@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfirmDialog, NameDialog } from '../Dialogs';
-import type { MenuItem } from '../ContextMenu';
+import { useContextMenu, type MenuItem } from '../ContextMenu';
 import { Icon } from '../Icon';
-import { CaptureList, type Layout } from '../library/CaptureList';
+import { CaptureList, linkTitle, linkOpenLabel, type Layout } from '../library/CaptureList';
 import { native, type CaptureItem, type Folder, type Settings } from '../native';
 import { formatShortcut } from '../settings/shortcut';
 import { errorMessage } from '../util';
@@ -19,6 +19,7 @@ const TABS: { id: Tab; label: string }[] = [{ id: 'all', label: 'All' }, { id: '
 type Dialog =
   | { name: 'new-folder' }
   | { name: 'rename'; folder: Folder }
+  | { name: 'rename-link'; item: CaptureItem }
   | { name: 'delete-folder'; folder: Folder }
   | { name: 'delete'; item: CaptureItem };
 
@@ -64,6 +65,7 @@ export function Shelf(p: Props) {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const folders = useFolders(p.rev, onError);
+  const newMenu = useContextMenu();
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLElement>(null);
   const played = useRef<string | null>(null);
@@ -106,8 +108,10 @@ export function Shelf(p: Props) {
     native.moveCapture(item.id, folderId).then(onChanged).catch(report);
 
   const itemMenu = (item: CaptureItem): MenuItem[] => [
-    { label: item.kind === 'url' ? 'Open in browser' : item.kind === 'video' ? 'Play video' : 'Open', onSelect: () => p.onOpen(item) },
+    { label: item.kind === 'url' ? linkOpenLabel(item) : item.kind === 'video' ? 'Play video' : 'Open', onSelect: () => p.onOpen(item) },
     ...(item.kind === 'video' ? [] : [{ label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) }]),
+    { label: 'Show in Explorer', onSelect: () => native.reveal(item.id).catch(report) },
+    ...(item.kind === 'url' ? [{ label: 'Rename...', onSelect: () => setDialog({ name: 'rename-link', item }) }] : []),
     { label: 'Save as…', onSelect: () => native.save(item.id).then(ok => ok && setToast('Saved')).catch(report) },
     { label: 'Move to folder', submenu: [
       { label: 'No folder', checked: item.folderId === null, onSelect: () => move(item, null) },
@@ -119,6 +123,7 @@ export function Shelf(p: Props) {
   const folderMenu = (folder: Folder): MenuItem[] => [
     { label: filters.folderId === folder.id ? 'Show all captures' : 'Show this folder', onSelect: () => p.onFilters({ ...filters, folderId: filters.folderId === folder.id ? null : folder.id }) },
     { label: settings?.activeFolder === folder.id ? 'Stop using as default' : 'Use as default folder', onSelect: () => p.onPatch({ activeFolder: settings?.activeFolder === folder.id ? null : folder.id }) },
+    ...(folder.path ? [{ label: 'Open in Explorer', onSelect: () => native.openFolder(folder.id).catch(report) }] : []),
     { label: 'Rename…', separatorBefore: true, onSelect: () => setDialog({ name: 'rename', folder }) },
     { label: 'Delete folder…', danger: true, onSelect: () => setDialog({ name: 'delete-folder', folder }) },
   ];
@@ -151,8 +156,12 @@ export function Shelf(p: Props) {
                   onKeyDown={e => { if (e.key !== 'Escape') return; e.preventDefault(); if (input === '') setSearching(false); else setInput(''); }}
                   placeholder="Search URL, name, kind or date" aria-label="Search library" />
               : <span className="spacer" />}
-            <button className="icon-btn" onClick={() => setDialog({ name: 'new-folder' })} aria-label="New folder" title="New folder"><Icon name="folderPlus" /></button>
-            <button className="icon-btn" onClick={addPcFolder} aria-label="Add PC folder" title="Add a folder from this PC"><Icon name="folderPc" /></button>
+            <button className="icon-btn" aria-label="New folder" title="New folder" aria-haspopup="menu" aria-expanded={newMenu.isOpen}
+              onClick={e => newMenu.openBelow([
+                { label: 'Captrain folder…', onSelect: () => setDialog({ name: 'new-folder' }) },
+                { label: 'Folder on this PC…', onSelect: addPcFolder },
+              ], e.currentTarget)}><Icon name="folderPlus" /></button>
+            {newMenu.menu}
             <button className="icon-btn" aria-pressed={searching} aria-label={searching ? 'Close search' : 'Search'}
               onClick={() => { if (searching) { setInput(''); } setSearching(!searching); }}><Icon name="search" /></button>
           </div>
@@ -189,6 +198,10 @@ export function Shelf(p: Props) {
       {dialog?.name === 'rename' && (
         <NameDialog title="Rename folder" initial={dialog.folder.name} submit="Rename" onCancel={closeDialog}
           onSubmit={async name => { await native.renameFolder(dialog.folder.id, name); onChanged(); closeDialog(); }} />
+      )}
+      {dialog?.name === 'rename-link' && (
+        <NameDialog title="Rename link" label="Link name" maxLength={120} initial={linkTitle(dialog.item)} submit="Rename" onCancel={closeDialog}
+          onSubmit={async name => { await native.renameLink(dialog.item.id, name); onChanged(); closeDialog(); }} />
       )}
       {dialog?.name === 'delete-folder' && (
         <ConfirmDialog title={`Delete “${dialog.folder.name}”?`} confirm="Delete folder" busy={busy} onCancel={closeDialog}
