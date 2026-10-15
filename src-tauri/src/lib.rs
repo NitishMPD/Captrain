@@ -2,8 +2,10 @@ mod capture;
 mod desktop;
 mod foreground;
 mod library;
+mod links;
 mod shelf_window;
 mod shortcuts;
+mod startup;
 mod updates;
 #[cfg(debug_assertions)]
 mod verification;
@@ -76,16 +78,18 @@ async fn list_captures(
     limit: usize,
     folder_id: Option<String>,
     exported_only: Option<bool>,
+    images_only: Option<bool>,
 ) -> Result<library::Page> {
     desktop::content_only(&window)?;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(state.library.lock().unwrap().list_filtered(
+        Ok(state.library.lock().unwrap().list_content(
             &query,
             offset,
             limit,
             folder_id.as_deref(),
             exported_only.unwrap_or(false),
+            images_only.unwrap_or(false),
         ))
     })
     .await
@@ -144,11 +148,19 @@ async fn save_capture(
     let state = state.inner().clone();
     let (source, name) = state.library.lock().unwrap().export_source(&id)?;
     shelf_window::action(&app, "hold")?;
+    let is_link = source.extension().is_some_and(|e| e == "url");
     let dialog = rfd::AsyncFileDialog::new()
         .set_parent(&window)
         .set_title("Save capture")
         .set_file_name(name)
-        .add_filter("PNG image", &["png"])
+        .add_filter(
+            if is_link {
+                "Internet shortcut"
+            } else {
+                "PNG image"
+            },
+            if is_link { &["url"] } else { &["png"] },
+        )
         .save_file()
         .await;
     let _ = shelf_window::action(&app, "release");
@@ -197,7 +209,7 @@ fn get_settings(
     window: WebviewWindow,
     state: tauri::State<Arc<AppState>>,
 ) -> Result<shortcuts::Settings> {
-    shelf_only(&window)?;
+    desktop::content_only(&window)?;
     Ok(state.settings.lock().unwrap().value.clone())
 }
 #[tauri::command]
@@ -333,6 +345,7 @@ pub fn run() {
                             capture::start_with(app, Kind::Window, direct)
                         }
                         Some("screen") => capture::start(app, Kind::Screen),
+                        Some("url") => links::start(app),
                         _ => Ok(()),
                     };
                     if let Err(e) = result {
@@ -356,6 +369,10 @@ pub fn run() {
             shelf_state,
             shelf_action,
             start_capture,
+            links::save_link,
+            links::open_link,
+            startup::get_startup,
+            startup::set_startup,
             list_captures,
             capture_image,
             copy_capture,
@@ -433,7 +450,8 @@ pub fn run() {
             let exit =
                 tauri::menu::MenuItem::with_id(app, "exit", "Exit Captrain", true, None::<&str>)?;
             let menu = tauri::menu::Menu::with_items(app, &[&open, &exit])?;
-            let pixels = image::load_from_memory(include_bytes!("../icons/32x32.png"))?.into_rgba8();
+            let pixels =
+                image::load_from_memory(include_bytes!("../icons/32x32.png"))?.into_rgba8();
             let icon = tauri::image::Image::new_owned(pixels.into_raw(), 32, 32);
             tauri::tray::TrayIconBuilder::new()
                 .icon(icon)

@@ -104,7 +104,7 @@ export function Shelf(p: Props) {
     native.moveCapture(item.id, folderId).then(onChanged).catch(report);
 
   const itemMenu = (item: CaptureItem): MenuItem[] => [
-    { label: 'Open', onSelect: () => p.onOpen(item) },
+    { label: item.kind === 'url' ? 'Open in browser' : 'Open', onSelect: () => p.onOpen(item) },
     { label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) },
     { label: 'Save as…', onSelect: () => native.save(item.id).then(ok => ok && setToast('Saved')).catch(report) },
     { label: 'Move to folder', submenu: [
@@ -145,7 +145,7 @@ export function Shelf(p: Props) {
             {searching
               ? <input className="search" type="search" autoFocus value={input} onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key !== 'Escape') return; e.preventDefault(); if (input === '') setSearching(false); else setInput(''); }}
-                  placeholder="Search name, kind or date" aria-label="Search captures" />
+                  placeholder="Search URL, name, kind or date" aria-label="Search library" />
               : <span className="spacer" />}
             <button className="icon-btn" onClick={() => setDialog({ name: 'new-folder' })} aria-label="New folder"><Icon name="folderPlus" /></button>
             <button className="icon-btn" aria-pressed={searching} aria-label={searching ? 'Close search' : 'Search'}

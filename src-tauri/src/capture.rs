@@ -209,6 +209,9 @@ pub fn start(app: &AppHandle, kind: Kind) -> Result<()> {
     start_with(app, kind, false)
 }
 pub fn start_with(app: &AppHandle, kind: Kind, direct: bool) -> Result<()> {
+    if kind == Kind::Url {
+        return Err("Use Save link to save a browser URL.".into());
+    }
     let state = app.state::<Arc<AppState>>().inner().clone();
     if state.viewer.lock().unwrap().is_some() {
         return Err("Close the image viewer before starting a capture.".into());

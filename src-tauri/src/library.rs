@@ -24,6 +24,7 @@ pub enum Kind {
     Region,
     Window,
     Screen,
+    Url,
 }
 impl Kind {
     pub fn name(self) -> &'static str {
@@ -31,6 +32,7 @@ impl Kind {
             Self::Region => "region",
             Self::Window => "window",
             Self::Screen => "screen",
+            Self::Url => "url",
         }
     }
 }
@@ -48,6 +50,8 @@ pub struct Item {
     pub folder_id: Option<String>,
     #[serde(default)]
     pub exported_path: Option<PathBuf>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Folder {
@@ -261,8 +265,19 @@ impl Library {
         if directory.starts_with(self.root.canonicalize().map_err(err)?) {
             return Err("Choose a save folder outside Captrain's private library.".into());
         }
-        let destination =
-            directory.join(format!("{}-{}.png", filename.trim_end_matches(".png"), id));
+        let destination = directory.join(format!(
+            "{}-{}.{}",
+            Path::new(&filename)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy(),
+            id,
+            if source.extension().is_some_and(|e| e == "url") {
+                "url"
+            } else {
+                "png"
+            }
+        ));
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -297,8 +312,13 @@ impl Library {
                     Ok(index)
                         if index.items.iter().all(|i| {
                             Uuid::parse_str(&i.id).is_ok()
-                                && i.width > 0
-                                && i.height > 0
+                                && if i.kind == Kind::Url {
+                                    i.url
+                                        .as_deref()
+                                        .is_some_and(|u| crate::links::validate_url(u).is_ok())
+                                } else {
+                                    i.width > 0 && i.height > 0 && i.url.is_none()
+                                }
                                 && chrono::DateTime::parse_from_rfc3339(&i.created_at).is_ok()
                         }) && {
                             let mut ids = std::collections::HashSet::new();
@@ -331,7 +351,11 @@ impl Library {
         if index.items.iter().any(|i| {
             !root
                 .join("captures")
-                .join(format!("{}.png", i.id))
+                .join(format!(
+                    "{}.{}",
+                    i.id,
+                    if i.kind == Kind::Url { "url" } else { "png" }
+                ))
                 .is_file()
         }) {
             warning = Some("Some capture files are missing. Their metadata is preserved; only available captures are shown.".into());
@@ -355,6 +379,17 @@ impl Library {
         folder: Option<&str>,
         exported_only: bool,
     ) -> Page {
+        self.list_content(query, offset, limit, folder, exported_only, false)
+    }
+    pub fn list_content(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        folder: Option<&str>,
+        exported_only: bool,
+        images_only: bool,
+    ) -> Page {
         let q = query.to_lowercase();
         let terms: Vec<_> = q
             .split(|c: char| !c.is_alphanumeric())
@@ -365,7 +400,8 @@ impl Library {
             .iter()
             .rev()
             .filter(|i| {
-                if folder.is_some_and(|id| i.folder_id.as_deref() != Some(id))
+                if (images_only && i.kind == Kind::Url)
+                    || folder.is_some_and(|id| i.folder_id.as_deref() != Some(id))
                     || (exported_only && i.exported_path.is_none())
                 {
                     return false;
@@ -376,9 +412,15 @@ impl Library {
                 let date = chrono::DateTime::parse_from_rfc3339(&i.created_at)
                     .map(|d| d.with_timezone(&Local).format("%x %B %e %Y").to_string())
                     .unwrap_or_default();
-                let searchable =
-                    format!("{} {} {} {}", i.kind.name(), i.created_at, date, i.filename)
-                        .to_lowercase();
+                let searchable = format!(
+                    "{} {} {} {} {}",
+                    i.kind.name(),
+                    i.created_at,
+                    date,
+                    i.filename,
+                    i.url.as_deref().unwrap_or("")
+                )
+                .to_lowercase();
                 terms.iter().all(|term| searchable.contains(term))
             })
             .collect();
@@ -395,7 +437,11 @@ impl Library {
     fn path(&self, item: &Item, thumbnail: bool) -> PathBuf {
         self.root
             .join(if thumbnail { "thumbnails" } else { "captures" })
-            .join(format!("{}.png", item.id))
+            .join(format!(
+                "{}.{}",
+                item.id,
+                if item.kind == Kind::Url { "url" } else { "png" }
+            ))
     }
     fn find(&self, id: &str) -> Result<&Item> {
         self.items
@@ -405,6 +451,9 @@ impl Library {
     }
     pub fn image(&self, id: &str, thumbnail: bool) -> Result<String> {
         let item = self.find(id)?;
+        if item.kind == Kind::Url {
+            return Err("Links do not have an image.".into());
+        }
         let bytes = fs::read(self.path(item, thumbnail)).map_err(err)?;
         Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
     }
@@ -414,6 +463,9 @@ impl Library {
         image: DynamicImage,
         folder: Option<&str>,
     ) -> Result<Item> {
+        if kind == Kind::Url {
+            return Err("Links must be saved with commit_url.".into());
+        }
         self.validate_folder(folder)?;
         if !self.writable {
             return Err("Capture index needs recovery; existing data was left untouched.".into());
@@ -434,6 +486,7 @@ impl Library {
             ),
             folder_id: folder.map(String::from),
             exported_path: None,
+            url: None,
         };
         let original = self.path(&item, false);
         let thumb = self.path(&item, true);
@@ -468,7 +521,52 @@ impl Library {
         }
         result.map(|_| item)
     }
+    pub fn commit_url(&mut self, url: &str, folder: Option<&str>) -> Result<Item> {
+        let url = crate::links::validate_url(url)?;
+        if !self.writable {
+            return Err("Capture index needs recovery; existing data was left untouched.".into());
+        }
+        self.validate_folder(folder)?;
+        let now = Utc::now();
+        let item = Item {
+            id: Uuid::new_v4().to_string(),
+            kind: Kind::Url,
+            created_at: now.to_rfc3339(),
+            width: 0,
+            height: 0,
+            filename: format!("Captrain-link-{}.url", now.format("%Y%m%d-%H%M%S")),
+            folder_id: folder.map(String::from),
+            exported_path: None,
+            url: Some(url.clone()),
+        };
+        let path = self.path(&item, false);
+        atomic_write(
+            &path,
+            format!("[InternetShortcut]\r\nURL={url}\r\n").as_bytes(),
+        )?;
+        self.items.push(item.clone());
+        if let Err(e) = self.persist() {
+            self.items.pop();
+            let _ = fs::remove_file(path);
+            return Err(e);
+        }
+        Ok(item)
+    }
+    pub fn url(&self, id: &str) -> Result<String> {
+        crate::links::validate_url(
+            self.find(id)?
+                .url
+                .as_deref()
+                .ok_or("This item is not a link.")?,
+        )
+    }
     pub fn copy(&self, id: &str) -> Result<()> {
+        if let Some(url) = &self.find(id)?.url {
+            return arboard::Clipboard::new()
+                .map_err(err)?
+                .set_text(crate::links::validate_url(url)?)
+                .map_err(err);
+        }
         let image = image::open(self.path(self.find(id)?, false))
             .map_err(err)?
             .into_rgba8();
@@ -516,6 +614,43 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn links_persist_search_move_export_and_delete() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut l = Library::open(root.clone()).unwrap();
+        let folder = l.create_folder("Research").unwrap();
+        let item = l
+            .commit_url("https://example.com/path?q=one#two", Some(&folder.id))
+            .unwrap();
+        assert!(l.commit_url("javascript:alert(1)", None).is_err());
+        assert_eq!(l.list("example", 0, 20).total, 1);
+        assert_eq!(l.list_content("", 0, 20, None, false, true).total, 0);
+        assert_eq!(l.folders()[0].count, 1);
+        assert!(l.image(&item.id, false).is_err());
+        assert!(fs::read_to_string(l.export_source(&item.id).unwrap().0)
+            .unwrap()
+            .contains("URL=https://example.com/"));
+        let mut l = Library::open(root.clone()).unwrap();
+        assert_eq!(
+            l.url(&item.id).unwrap(),
+            "https://example.com/path?q=one#two"
+        );
+        l.move_capture(&item.id, None).unwrap();
+        // Keep export outside the private library, as required by the production path.
+        let exports = root.with_extension("link-exports");
+        fs::create_dir(&exports).unwrap();
+        let exported = l
+            .auto_export(&item.id, &exports)
+            .unwrap()
+            .exported_path
+            .unwrap();
+        assert_eq!(exported.extension().unwrap(), "url");
+        l.delete(&item.id).unwrap();
+        assert!(exported.is_file());
+        fs::remove_dir_all(exports).unwrap();
+        assert_eq!(l.list("", 0, 20).total, 0);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn folders_migrate_legacy_and_ungroup_without_deleting_images() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
@@ -648,6 +783,7 @@ mod tests {
                 filename: format!("capture-{n}.png"),
                 folder_id: None,
                 exported_path: None,
+                url: None,
             });
         }
         let page = l.list("screen", 20, 20);

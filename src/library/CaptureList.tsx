@@ -22,13 +22,14 @@ export function CaptureList({ items, thumbs, layout, freshId, onOpen, menuFor }:
         {items.map(item => (
           <li key={item.id}>
             <button className={`row${item.id === freshId ? ' fresh' : ''}`} onClick={() => onOpen(item)} {...bind(() => menuFor(item))}
-              aria-haspopup="menu" aria-label={`${item.filename}, ${kindLabel(item.kind)} capture, ${formatTime(item.createdAt)}, ${item.width} by ${item.height} pixels`}>
+              aria-haspopup="menu" aria-label={`${item.url ?? item.filename}, ${kindLabel(item.kind)}, ${formatTime(item.createdAt)}, ${item.kind === 'url' ? 'Open in browser' : `${item.width} by ${item.height} pixels`}`}>
               <span className="thumb" data-thumb={item.id}>
+                {item.kind === 'url' && <Icon name="link" />}
                 {thumbs[item.id] && <img src={thumbs[item.id]} alt="" draggable={false} />}
-                <span className="badge"><Icon name={item.exportedPath ? 'save' : 'image'} /></span>
+                <span className="badge"><Icon name={item.exportedPath ? 'save' : item.kind === 'url' ? 'link' : 'image'} /></span>
               </span>
               <span className="meta">
-                <strong>{item.filename}</strong>
+                <strong title={item.url ?? item.filename}>{item.url ?? item.filename}</strong>
                 <span>{kindLabel(item.kind)} · {relativeTime(item.createdAt)}</span>
               </span>
             </button>

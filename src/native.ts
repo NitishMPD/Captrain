@@ -3,11 +3,11 @@ import { listen } from '@tauri-apps/api/event';
 
 export type CaptureKind = 'region' | 'window' | 'screen';
 export type Mode = 'collapsed' | 'temporary' | 'manual' | 'capturing';
-export interface CaptureItem { id: string; kind: CaptureKind; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
+export interface CaptureItem { id: string; kind: CaptureKind | 'url'; url: string | null; createdAt: string; width: number; height: number; filename: string; folderId: string | null; exportedPath: string | null; }
 export interface Folder { id: string; name: string; count: number; }
 export interface ViewerContext { id: string; query: string; folderId: string | null; exportedOnly: boolean; }
 export interface ShelfState { mode: Mode; hovered: boolean; error: string | null; reveal: number; }
-export interface Settings { edge: 'left' | 'right'; display: string | null; shortcuts: Record<'region' | 'window' | 'screen' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; }
+export interface Settings { edge: 'left' | 'right'; display: string | null; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; theme: 'system' | 'light' | 'dark'; }
 export interface Display { id: string; name: string; }
 export interface LibraryPage { items: CaptureItem[]; total: number; }
 export interface OverlayData { kind: 'region' | 'window'; image: string | null; width: number; height: number; windows: { id: string; x: number; y: number; width: number; height: number }[]; }
@@ -16,7 +16,12 @@ export const native = {
   state: () => invoke<ShelfState>('shelf_state'),
   shelf: (action: 'open' | 'collapse' | 'toggle' | 'enter' | 'leave' | 'interact' | 'hold' | 'release' | 'ready' | 'clearError', reveal?: number) => invoke<void>('shelf_action', { action, reveal }),
   capture: (kind: CaptureKind, direct = false) => invoke<void>('start_capture', { kind, direct }),
-  list: (query = '', offset = 0, limit = 20, folderId: string | null = null, exportedOnly = false) => invoke<LibraryPage>('list_captures', { query, offset, limit, folderId, exportedOnly }),
+  saveLink: () => invoke<void>('save_link'),
+  openLink: (id: string) => invoke<void>('open_link', { id }),
+  startup: () => invoke<boolean>('get_startup'),
+  setStartup: (enabled: boolean) => invoke<boolean>('set_startup', { enabled }),
+  onSettingsChanged: (fn: (settings: Settings) => void) => listen<Settings>('settings-changed', e => fn(e.payload)),
+  list: (query = '', offset = 0, limit = 20, folderId: string | null = null, exportedOnly = false, imagesOnly = false) => invoke<LibraryPage>('list_captures', { query, offset, limit, folderId, exportedOnly, imagesOnly }),
   folders: () => invoke<Folder[]>('list_folders'),
   createFolder: (name: string) => invoke<Folder>('create_folder', { name }),
   renameFolder: (id: string, name: string) => invoke<void>('rename_folder', { id, name }),

@@ -10,7 +10,7 @@ const EMPTY: LibraryPage = { items: [], total: 0 };
  * Re-runs on any argument change; superseded requests are ignored and thumbnails
  * for items that left the page are dropped.
  */
-export function useCaptures(query: string, offset: number, limit: number, rev: number, onSettled?: () => void, folderId: string | null = null, exportedOnly = false) {
+export function useCaptures(query: string, offset: number, limit: number, rev: number, onSettled?: () => void, folderId: string | null = null, exportedOnly = false, imagesOnly = false) {
   const [page, setPage] = useState<LibraryPage>(EMPTY);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
@@ -23,7 +23,7 @@ export function useCaptures(query: string, offset: number, limit: number, rev: n
     let live = true;
     (async () => {
       try {
-        const next = await loadRange((o, l) => native.list(query, o, l, folderId, exportedOnly), limit, offset);
+        const next = await loadRange((o, l) => native.list(query, o, l, folderId, exportedOnly, imagesOnly), limit, offset);
         if (!live) return;
         const keep: Record<string, string> = {};
         for (const item of next.items) if (cache.current[item.id]) keep[item.id] = cache.current[item.id];
@@ -32,7 +32,7 @@ export function useCaptures(query: string, offset: number, limit: number, rev: n
         setThumbs(keep);
         setError(null);
         setLoaded(true);
-        await Promise.all(next.items.filter(i => !keep[i.id]).map(async i => {
+        await Promise.all(next.items.filter(i => i.kind !== 'url' && !keep[i.id]).map(async i => {
           try {
             const url = await native.image(i.id, true);
             const image = new Image();
@@ -50,7 +50,7 @@ export function useCaptures(query: string, offset: number, limit: number, rev: n
       }
     })();
     return () => { live = false; };
-  }, [query, offset, limit, rev, folderId, exportedOnly]);
+  }, [query, offset, limit, rev, folderId, exportedOnly, imagesOnly]);
 
   return { ...page, thumbs, loaded, error };
 }

@@ -35,7 +35,7 @@ export function Viewer() {
   latest.current = { current, stage, size };
 
   const loadPage = useCallback(async (context: ViewerContext, offset: number) => {
-    const page = await native.list(context.query, offset, MAX_PAGE, context.folderId, context.exportedOnly);
+    const page = await native.list(context.query, offset, MAX_PAGE, context.folderId, context.exportedOnly, true);
     setTotal(page.total);
     return page.items;
   }, []);
@@ -48,7 +48,7 @@ export function Viewer() {
       if (!live) return;
       setCtx(context);
       setFolders(all);
-      const found = await locate((o, l) => native.list(context.query, o, l, context.folderId, context.exportedOnly), context.id);
+      const found = await locate((o, l) => native.list(context.query, o, l, context.folderId, context.exportedOnly, true), context.id);
       if (!live) return;
       setItems(found.items);
       setTotal(found.total);

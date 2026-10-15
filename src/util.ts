@@ -21,7 +21,7 @@ export const relativeTime = (iso: string, now = Date.now()) => {
   const [unit, size] = UNITS.find(([, s]) => Math.abs(seconds) >= s) ?? ['second', 1];
   return Math.abs(seconds) < 45 ? 'Just now' : relative.format(Math.round(seconds / size), unit);
 };
-export const kindLabel =(k: CaptureKind) => k[0].toUpperCase() + k.slice(1);
+export const kindLabel =(k: CaptureKind | 'url') => k === 'url' ? 'Link' : k[0].toUpperCase() + k.slice(1);
 
 /** Keeps the shelf from auto-dismissing while a menu, dialog or settings is open. */
 export function useHold(active: boolean) {

@@ -10,6 +10,7 @@ const ACTIONS: { id: Action; label: string }[] = [
   { id: 'region', label: 'Capture region' },
   { id: 'window', label: 'Capture window' },
   { id: 'screen', label: 'Capture screen' },
+  { id: 'url', label: 'Save browser link' },
   { id: 'toggle', label: 'Toggle shelf' },
 ];
 
@@ -18,6 +19,12 @@ interface Props { settings: SettingsData; onSaved: (s: SettingsData) => void; on
 export function Settings({ settings, onSaved, onBack }: Props) {
   const [displays, setDisplays] = useState<Display[]>([]);
   const [storage, setStorage] = useState('');
+  const [startup, setStartup] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    native.startup().then(value => { if (live) setStartup(value); }).catch(e => { if (live) setErrors(x => ({ ...x, startup: errorMessage(e) })); });
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     let live = true;
     native.storagePath().then(path => { if (live) setStorage(path); }).catch(() => {});
@@ -91,6 +98,33 @@ export function Settings({ settings, onSaved, onBack }: Props) {
       </header>
       <main className="body settings">
         <AppUpdates />
+        <section aria-labelledby="s-general">
+          <h2 id="s-general">General</h2>
+          <div className="field" role="radiogroup" aria-label="Appearance">
+            <span className="label">Appearance</span>
+            <div className="seg">
+              {(['system', 'light', 'dark'] as const).map(theme => (
+                <button key={theme} role="radio" aria-checked={settings.theme === theme} disabled={busy}
+                  onClick={() => settings.theme !== theme && apply('theme', () => native.updateSettings({ ...settings, theme }))}>
+                  {theme[0].toUpperCase() + theme.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {errors.theme && <p className="field-error" role="alert">{errors.theme}</p>}
+          <div className="field">
+            <span className="label" id="l-startup">Start with Windows</span>
+            <button className="switch" role="switch" aria-checked={startup ?? false} aria-labelledby="l-startup" disabled={busy || startup === null}
+              onClick={async () => {
+                setBusy(true);
+                try { setStartup(await native.setStartup(!startup)); setErrors(({ startup: _, ...rest }) => rest); }
+                catch (e) { setErrors(x => ({ ...x, startup: errorMessage(e) })); }
+                finally { setBusy(false); }
+              }} />
+          </div>
+          <p className="note">Open the shelf bar when you sign in. Enable this from your installed copy of Captrain.</p>
+          {errors.startup && <p className="field-error" role="alert">{errors.startup}</p>}
+        </section>
         <section aria-labelledby="s-display">
           <h2 id="s-display">Shelf</h2>
           <div className="field" role="radiogroup" aria-label="Screen edge">
@@ -155,6 +189,7 @@ export function Settings({ settings, onSaved, onBack }: Props) {
 
         <section aria-labelledby="s-keys">
           <h2 id="s-keys">Shortcuts</h2>
+          <p className="note">Save browser link reads the address bar in Chrome, Edge or Brave without changing your clipboard. Only HTTP and HTTPS pages are supported.</p>
           {ACTIONS.map(({ id, label }) => (
             <div key={id}>
               <div className="field">

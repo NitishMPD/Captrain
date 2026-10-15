@@ -58,6 +58,9 @@ export function CaptureControl({ settings, folders, onPatch, onSettings, onNewFo
           <Icon name="chevron" />
         </button>
       </div>
+      <button className="icon-btn" disabled={!settings} aria-label="Save active browser link"
+        title={`Save browser link${settings ? ` / ${formatShortcut(settings.shortcuts.url)}` : ''}`}
+        onClick={() => native.saveLink().catch(e => onError(errorMessage(e)))}><Icon name="link" /></button>
       <button className="dest" aria-haspopup="menu" aria-expanded={destinationMenu.isOpen} disabled={!settings}
         onClick={e => destinationMenu.openAbove(folderMenu(), e.currentTarget)}>
         <span><small>Folder</small><strong>{active?.name ?? 'None'}</strong></span>

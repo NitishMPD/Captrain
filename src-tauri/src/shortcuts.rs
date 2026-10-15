@@ -26,6 +26,11 @@ pub struct Settings {
     pub capture_kind: crate::library::Kind,
     #[serde(default)]
     pub active_folder: Option<String>,
+    #[serde(default = "theme_default")]
+    pub theme: String,
+}
+fn theme_default() -> String {
+    "system".into()
 }
 fn instant_default() -> bool {
     true
@@ -42,10 +47,12 @@ impl Default for Settings {
             instant_capture: true,
             capture_kind: crate::library::Kind::Region,
             active_folder: None,
+            theme: theme_default(),
             shortcuts: [
                 ("region", "Ctrl+Alt+1"),
                 ("window", "Ctrl+Alt+2"),
                 ("screen", "Ctrl+Alt+3"),
+                ("url", "Ctrl+Alt+4"),
                 ("toggle", "Ctrl+Alt+Space"),
             ]
             .into_iter()
@@ -63,13 +70,18 @@ pub fn validate(settings: &Settings) -> Result<BTreeMap<String, Shortcut>> {
     if !["left", "right"].contains(&settings.edge.as_str()) {
         return Err("Choose the left or right edge.".into());
     }
-    let expected = ["region", "window", "screen", "toggle"];
-    if settings.shortcuts.len() != 4
+    if !["system", "light", "dark"].contains(&settings.theme.as_str())
+        || settings.capture_kind == crate::library::Kind::Url
+    {
+        return Err("Choose a supported theme and screenshot type.".into());
+    }
+    let expected = ["region", "window", "screen", "url", "toggle"];
+    if settings.shortcuts.len() != 5
         || expected
             .iter()
             .any(|k| !settings.shortcuts.contains_key(*k))
     {
-        return Err("Four shortcut bindings are required.".into());
+        return Err("Five shortcut bindings are required.".into());
     }
     let mut ids = HashSet::new();
     settings
@@ -99,9 +111,34 @@ pub fn validate(settings: &Settings) -> Result<BTreeMap<String, Shortcut>> {
         })
         .collect()
 }
+fn migrate(mut settings: Settings) -> Settings {
+    if settings.shortcuts.len() == 4
+        && ["region", "window", "screen", "toggle"]
+            .iter()
+            .all(|k| settings.shortcuts.contains_key(*k))
+    {
+        let used: HashSet<_> = settings
+            .shortcuts
+            .values()
+            .filter_map(|s| s.parse::<Shortcut>().ok().map(|s| s.id()))
+            .collect();
+        let binding = [
+            "Ctrl+Alt+4",
+            "Ctrl+Alt+Shift+4",
+            "Ctrl+Alt+5",
+            "Ctrl+Alt+Shift+5",
+            "Ctrl+Alt+6",
+        ]
+        .into_iter()
+        .find(|s| !used.contains(&s.parse::<Shortcut>().unwrap().id()))
+        .unwrap();
+        settings.shortcuts.insert("url".into(), binding.into());
+    }
+    settings
+}
 pub fn load(root: &Path) -> Result<StoredSettings> {
     match fs::read(root.join("settings.json")) {
-        Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes).ok().filter(|s| validate(s).is_ok()) {
+        Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes).ok().map(migrate).filter(|s| validate(s).is_ok()) {
             Some(value) => Ok(StoredSettings { value, writable: true, warning: None }),
             None => Ok(StoredSettings { value: Settings::default(), writable: false, warning: Some("Settings are damaged and have been preserved. Defaults are active; recover settings.json before saving changes.".into()) }),
         },
@@ -198,6 +235,10 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
         }
     }
     drop(settings);
+    {
+        use tauri::Emitter;
+        let _ = app.emit("settings-changed", &next);
+    }
     crate::shelf_window::apply(app, false);
     Ok(next)
 }
@@ -206,6 +247,27 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
 mod tests {
     use super::*;
     #[test]
+    fn legacy_shortcuts_gain_link_without_conflicting_with_custom_bindings() {
+        let mut settings = Settings::default();
+        settings.shortcuts.remove("url");
+        settings
+            .shortcuts
+            .insert("screen".into(), "Ctrl+Alt+4".into());
+        let settings = migrate(settings);
+        assert_eq!(settings.shortcuts["screen"], "Ctrl+Alt+4");
+        assert_ne!(settings.shortcuts["url"], "Ctrl+Alt+4");
+        assert!(validate(&settings).is_ok());
+    }
+    #[test]
+    fn rejects_unknown_theme_and_url_as_screenshot_kind() {
+        let mut settings = Settings::default();
+        settings.theme = "neon".into();
+        assert!(validate(&settings).is_err());
+        settings.theme = "dark".into();
+        settings.capture_kind = crate::library::Kind::Url;
+        assert!(validate(&settings).is_err());
+    }
+    #[test]
     fn previous_settings_gain_capture_defaults() {
         let mut json = serde_json::to_value(Settings::default()).unwrap();
         for field in [
@@ -213,6 +275,7 @@ mod tests {
             "instantCapture",
             "captureKind",
             "activeFolder",
+            "theme",
         ] {
             json.as_object_mut().unwrap().remove(field);
         }

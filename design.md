@@ -2,7 +2,7 @@
 
 Author: Nitish
 
-Source of truth: PLAN.md with Nitish's 14 October reference and requested screenshot workflow corrections below. Windows 11 x64, Tauri 2, React and TypeScript, Rust native ownership. Still captures only; Nitish confirmed screenshots first, with video later.
+Source of truth: PLAN.md with Nitish's 14 October reference and requested screenshot workflow corrections below. Windows 11 x64, Tauri 2, React and TypeScript, Rust native ownership. Screenshots and saved web links; video remains later.
 
 ## User experience
 
@@ -13,6 +13,10 @@ Library searches kind, localized date and filename with pagination and folder/ex
 Clicking a thumbnail opens a separate owner-modal native viewer over the shelf, with previous/next navigation across the filtered library, fit/1:1/zoom controls, wheel zoom, pointer pan, Copy, Save as, Move to folder and confirmed Delete. Escape closes it. The parent shelf is disabled and held open until viewer close. Capture rows offer the same appropriate actions through a custom right-click menu with keyboard support; editable text retains its text-editing menu. No browser page menu on the app surface.
 
 Instant capture is an explicit persisted setting, enabled by default. The main Capture button immediately executes the selected Region/Window/Screen action; its separate arrow changes type. Region immediately opens selection; direct Window captures the last external foreground window, remembered before shelf activation by a native foreground event hook. Disabling instant mode presents the action menu/window picker. A committed thumbnail animates into the shelf and settles into its row; reduced motion skips the flight. Settings retain transactional shortcut-conflict feedback. No Record placeholders, automatic clipboard replacement, accounts or remote content.
+
+Save the active page in Chrome, Edge or Brave on Windows with Ctrl+Alt+4 (editable in Shortcuts), or the shelf's Save browser link button using the last external browser window. Native Windows UI Automation reads the visible document URL, falling back to an unambiguous address-bar URL; it never focuses controls, sends keystrokes, changes the clipboard, or reads page content. Only complete HTTP/HTTPS URLs without embedded credentials are accepted. Unsupported, inaccessible and ambiguous pages report an error without creating an item. Each saved link commits a local .url file and metadata atomically, appears under All and applicable folders/Exports, supports URL search, opens in the default browser and shares Copy, Save as, Move and Delete. Captures and image-viewer navigation contain screenshots only. Automatic disk copies also support .url files; failures retain the protected original. Existing screenshot history and custom shortcuts migrate without replacement.
+
+Settings > General offers System, Light and Dark appearance, with System retaining the previous Windows-following behavior. The persisted choice applies to the shelf and image viewer and is cached for first paint. Start with Windows is off until enabled; its switch reads and writes Captrain's quoted executable entry in the current user's Windows Run key, requires no administrator rights and starts the existing shelf bar at sign-in. Enable it from the installed copy. Windows Startup settings can independently disable startup.
 
 ## Brand identity
 

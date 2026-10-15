@@ -39,7 +39,7 @@ export function App() {
     awaitingItem.current = false;
     armTimer();
   }, [armTimer]);
-  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports');
+  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports', filters.tab === 'captures');
 
   const changeFilters = (next: Filters) => { setFilters(next); setLimit(PAGE); };
   const bump = useCallback(() => setRev(r => r + 1), []);
@@ -109,7 +109,7 @@ export function App() {
   const error = notice ?? shelf.error;
   const dismiss = () => { setNotice(null); if (shelf.error) quiet(native.shelf('clearError')); };
   const openViewer = (item: CaptureItem) =>
-    native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports').catch(e => setNotice(errorMessage(e)));
+    (item.kind === 'url' ? native.openLink(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports')).catch(e => setNotice(errorMessage(e)));
 
   if (shelf.mode === 'capturing') return null;
 

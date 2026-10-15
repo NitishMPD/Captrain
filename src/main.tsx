@@ -3,10 +3,20 @@ import { App } from './App';
 import { Overlay } from './overlay/Overlay';
 import { Viewer } from './viewer/Viewer';
 import './styles.css';
+import { native, type Settings } from './native';
 
 const params = new URLSearchParams(location.search);
 const surface = params.get('overlay') === '1' ? 'overlay' : params.get('viewer') === '1' ? 'viewer' : 'shelf';
 document.documentElement.dataset.surface = surface;
+const applyTheme = (theme: Settings['theme']) => {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('theme', theme);
+};
+applyTheme((localStorage.getItem('theme') as Settings['theme']) ?? 'system');
+if (surface !== 'overlay') {
+  native.onSettingsChanged(settings => applyTheme(settings.theme))
+    .then(() => native.settings()).then(settings => applyTheme(settings.theme)).catch(() => {});
+}
 
 // The browser menu never shows; text fields keep the native one for copy/paste and spelling.
 document.addEventListener('contextmenu', e => {
