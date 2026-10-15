@@ -12,6 +12,7 @@ const PATHS = {
   home: 'M4 11 12 4l8 7v9h-5v-6H9v6H4v-9Z',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
   folderPlus: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 4v5m-2.5-2.5h5',
+  folderPc: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm6.5 5.5 2.5 2.5 2.5-2.5M12 10v5',
   image: 'M4 5h16v14H4V5Zm0 11 4.5-4.5 3.5 3.5 3-3L20 16M9 9.5h.01',
   chevron: 'm7 14 5-5 5 5',
   down: 'm7 10 5 5 5-5',

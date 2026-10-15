@@ -18,6 +18,9 @@ interface Props {
   menuFor: (item: CaptureItem) => MenuItem[];
 }
 
+/** Drag payload type: a capture id dropped onto a folder tile. */
+export const DRAG_TYPE = 'application/x-captrain-capture';
+
 export function CaptureList({ items, thumbs, layout, freshId, onOpen, menuFor }: Props) {
   const { menu, bind } = useContextMenu();
   return (
@@ -25,7 +28,7 @@ export function CaptureList({ items, thumbs, layout, freshId, onOpen, menuFor }:
       <ul className={layout === 'grid' ? 'grid' : 'list'}>
         {items.map(item => (
           <li key={item.id}>
-            <button className={`row${item.id === freshId ? ' fresh' : ''}${item.kind === 'url' ? ' link-row' : ''}`} onClick={() => onOpen(item)} {...bind(() => menuFor(item))}
+            <button draggable onDragStart={e => { e.dataTransfer.setData(DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }} className={`row${item.id === freshId ? ' fresh' : ''}${item.kind === 'url' ? ' link-row' : ''}`} onClick={() => onOpen(item)} {...bind(() => menuFor(item))}
               aria-haspopup="menu" aria-label={`${item.url ?? item.filename}, ${kindLabel(item.kind)}, ${formatTime(item.createdAt)}, ${item.kind === 'url' ? 'Open in browser' : `${item.width} by ${item.height} pixels`}`}>
               <span className="thumb" data-thumb={item.id}>
                 {(item.kind === 'url' || item.kind === 'video') && <Icon name={item.kind === 'video' ? 'video' : 'link'} />}

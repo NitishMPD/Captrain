@@ -32,6 +32,7 @@ export function App() {
   const mode = useRef(shelf.mode);
   const reveal = useRef(shelf.reveal);
   const awaitingItem = useRef(false);
+  const dragging = useRef(false);
 
   const armTimer = useCallback(() => {
     const generation = reveal.current;
@@ -42,7 +43,7 @@ export function App() {
     awaitingItem.current = false;
     armTimer();
   }, [armTimer]);
-  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports', false, filters.tab === 'captures');
+  const list = useCaptures(filters.query, 0, limit, rev, onSettled, filters.folderId, filters.tab === 'exports' && filters.folderId === null, false, filters.tab === 'captures');
 
   const changeFilters = (next: Filters) => { setFilters(next); setLimit(PAGE); };
   const bump = useCallback(() => setRev(r => r + 1), []);
@@ -51,7 +52,8 @@ export function App() {
     let disposed = false;
     const unlisten: (() => void)[] = [];
     (async () => {
-      const [offState, offCapture, offLibrary, offRecording] = await Promise.all([
+      const [offState, offCapture, offLibrary, offRecording, offSettings] = await Promise.all([
+        native.onSettingsChanged(setSettings),
         native.onOpenRecording(() => setView('recording')),
         native.onState(s => {
           const previous = mode.current;
@@ -74,8 +76,8 @@ export function App() {
           native.settings().then(s => { if (!disposed) setSettings(s); }).catch(() => {});
         }),
       ]);
-      if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); return; }
-      unlisten.push(offState, offCapture, offLibrary, offRecording);
+      if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); offSettings(); return; }
+      unlisten.push(offState, offCapture, offLibrary, offRecording, offSettings);
       const [state, loaded] = await Promise.all([native.state(), native.settings()]);
       if (disposed) return;
       mode.current = state.mode;
@@ -87,6 +89,10 @@ export function App() {
     return () => { disposed = true; unlisten.forEach(fn => fn()); };
   }, [armTimer]);
 
+  useEffect(() => {
+    if (settings?.shortcutsOnly && shelf.mode === 'temporary') armTimer();
+  }, [settings?.shortcutsOnly, shelf.mode, shelf.reveal, armTimer]);
+
   // A collapsed shelf always reopens on the newest captures with no filters.
   useEffect(() => {
     if (shelf.mode !== 'collapsed') return;
@@ -95,6 +101,9 @@ export function App() {
     setLimit(PAGE);
     setFreshId(null);
   }, [shelf.mode]);
+
+  // The window is shown without activation; give the page keyboard focus so Escape reaches it.
+  useEffect(() => { if (shelf.mode === 'manual') window.focus(); }, [shelf.mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -113,7 +122,7 @@ export function App() {
   const error = notice ?? shelf.error;
   const dismiss = () => { setNotice(null); if (shelf.error) quiet(native.shelf('clearError')); };
   const openViewer = (item: CaptureItem) =>
-    (item.kind === 'url' ? native.openLink(item.id) : item.kind === 'video' ? native.playRecording(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports')).catch(e => setNotice(errorMessage(e)));
+    (item.kind === 'url' ? native.openLink(item.id) : item.kind === 'video' ? native.playRecording(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports' && filters.folderId === null)).catch(e => setNotice(errorMessage(e)));
 
   if (shelf.mode === 'capturing') return null;
 
@@ -125,10 +134,38 @@ export function App() {
     onPointerLeave: () => quiet(native.shelf('leave')),
   };
 
+  if (settings?.shortcutsOnly && shelf.mode === 'collapsed') return null;
+
+  if (settings?.shortcutsOnly && shelf.mode === 'temporary') {
+    return (
+      <div {...root}>
+        <section className="panel capture-notification" aria-label="Capture notification">
+          <div className="capture-notification-message" role={error ? 'alert' : 'status'}>
+            <strong>{error ? 'Captrain needs attention' : 'Capture saved'}</strong>
+            <span>{error ?? 'Saved to your library.'}</span>
+          </div>
+          <div className="capture-notification-actions">
+            <button className="btn" onClick={() => quiet(native.shelf('open'))}>Open shelf</button>
+            <button className="btn" onClick={() => { dismiss(); quiet(native.shelf('collapse')); }}>Dismiss</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (shelf.mode === 'collapsed') {
     return (
       <div {...root}>
-        <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} onClick={() => quiet(native.shelf('open'))}>
+        <button className="bar" data-hovered={shelf.hovered} data-recording={recordingActive} aria-label={recordingActive ? "Open recording controls" : "Open Captrain shelf"} title="Click to open; drag to move along either screen edge"
+          onPointerDown={async e => {
+            if (e.button !== 0 || dragging.current) return;
+            e.preventDefault();
+            dragging.current = true;
+            try { if (!await native.dragShelf()) await native.shelf('open'); }
+            catch (error) { setNotice(errorMessage(error)); quiet(native.shelf('open')); }
+            finally { dragging.current = false; }
+          }}
+          onClick={e => { if (e.detail === 0) quiet(native.shelf('open')); }}>
           <span className="bar-line" />
         </button>
       </div>

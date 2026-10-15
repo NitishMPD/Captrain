@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../Icon';
-import { native, type Display, type Settings as SettingsData } from '../native';
+import { native, type Display, type Folder, type Settings as SettingsData } from '../native';
 import { errorMessage, kindLabel, quiet, useHold } from '../util';
 import { findDuplicate, formatShortcut, recordShortcut } from './shortcut';
 import { AppUpdates } from '../updates/AppUpdates';
 
 type Action = keyof SettingsData['shortcuts'];
+const DESTINATIONS: { id: keyof SettingsData['destinations']; label: string }[] = [
+  { id: 'region', label: 'Region captures' },
+  { id: 'image', label: 'Window & screen captures' },
+  { id: 'link', label: 'Links' },
+  { id: 'video', label: 'Videos' },
+];
 const ACTIONS: { id: Action; label: string }[] = [
   { id: 'region', label: 'Capture region' },
   { id: 'window', label: 'Capture window' },
@@ -15,11 +21,21 @@ const ACTIONS: { id: Action; label: string }[] = [
   { id: 'toggle', label: 'Toggle shelf' },
 ];
 
+const folderOptions = (folders: Folder[]) => (
+  <>
+    {folders.some(f => !f.path) && <optgroup label="In Captrain">{folders.filter(f => !f.path).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>}
+    {folders.some(f => f.path) && <optgroup label="On this PC">{folders.filter(f => f.path).map(f => <option key={f.id} value={f.id} title={f.path ?? undefined}>{f.name}</option>)}</optgroup>}
+  </>
+);
+
 interface Props { settings: SettingsData; onSaved: (s: SettingsData) => void; onBack: () => void }
 
 export function Settings({ settings, onSaved, onBack }: Props) {
   const [displays, setDisplays] = useState<Display[]>([]);
   const [storage, setStorage] = useState('');
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const loadFolders = () => native.folders().then(setFolders).catch(e => setErrors(x => ({ ...x, folders: errorMessage(e) })));
+  useEffect(() => { void loadFolders(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [startup, setStartup] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
@@ -175,9 +191,36 @@ export function Settings({ settings, onSaved, onBack }: Props) {
           {errors.captureKind && <p className="field-error" role="alert">{errors.captureKind}</p>}
         </section>
 
+        <section aria-labelledby="s-folders">
+          <h2 id="s-folders">Folders</h2>
+          <p className="note">Choose where new captures are filed. Folders on this PC also save the file into that directory.</p>
+          <div className="field">
+            <label className="label" htmlFor="dest-default">Default folder</label>
+            <select id="dest-default" value={settings.activeFolder ?? ''} disabled={busy}
+              onChange={e => apply('folders', () => native.updateSettings({ ...settings, activeFolder: e.target.value || null }))}>
+              <option value="">No folder</option>
+              {folderOptions(folders)}
+            </select>
+          </div>
+          {DESTINATIONS.map(({ id, label }) => (
+            <div className="field" key={id}>
+              <label className="label" htmlFor={`dest-${id}`}>{label}</label>
+              <select id={`dest-${id}`} value={settings.destinations[id] ?? ''} disabled={busy}
+                onChange={e => apply('folders', () => native.updateSettings({ ...settings, destinations: { ...settings.destinations, [id]: e.target.value || null } }))}>
+                <option value="">Same as default</option>
+                {folderOptions(folders)}
+              </select>
+            </div>
+          ))}
+          <div className="row-actions">
+            <button className="btn" disabled={busy} onClick={() => native.createPermanentFolder().then(loadFolders).catch(e => setErrors(x => ({ ...x, folders: errorMessage(e) })))}>Add PC folder…</button>
+          </div>
+          {errors.folders && <p className="field-error" role="alert">{errors.folders}</p>}
+        </section>
+
         <section aria-labelledby="s-save">
           <h2 id="s-save">Save to disk</h2>
-          <p className="note">Every capture is also copied to this folder. Originals stay protected inside Captrain.</p>
+          <p className="note">Captures not filed in a PC folder are also copied here. Originals stay protected inside Captrain.</p>
           <p className="path" title={settings.captureFolder ?? undefined}>{settings.captureFolder ?? 'Off — captures stay in Captrain only'}</p>
           <div className="row-actions">
             <button className="btn" disabled={busy} onClick={() => apply('captureFolder', native.chooseCaptureFolder)}>{settings.captureFolder ? 'Change folder…' : 'Choose folder…'}</button>

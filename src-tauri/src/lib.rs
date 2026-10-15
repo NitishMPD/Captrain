@@ -363,7 +363,7 @@ pub fn run() {
                         let mut shelf = state.shelf.lock().unwrap();
                         if shelf.view.mode == shelf_window::Mode::Collapsed {
                             shelf.begin();
-                            shelf.finish(false, Some(e), std::time::Instant::now());
+                            shelf.finish(false, Some(e), std::time::Instant::now(), false);
                         } else {
                             shelf.view.error = Some(e);
                         }
@@ -379,6 +379,7 @@ pub fn run() {
             updates::install_update,
             shelf_state,
             shelf_action,
+            shelf_window::drag_shelf,
             start_capture,
             recording::recording_targets,
             recording::recording_devices,
@@ -405,6 +406,7 @@ pub fn run() {
             record_shortcuts,
             desktop::list_folders,
             desktop::create_folder,
+            desktop::create_permanent_folder,
             desktop::rename_folder,
             desktop::delete_folder,
             desktop::move_capture,
@@ -467,7 +469,13 @@ pub fn run() {
                 tauri::menu::MenuItem::with_id(app, "open", "Open shelf", true, None::<&str>)?;
             let exit =
                 tauri::menu::MenuItem::with_id(app, "exit", "Exit Captrain", true, None::<&str>)?;
-            let menu = tauri::menu::Menu::with_items(app, &[&open, &exit])?;
+            let shortcuts_only = tauri::menu::CheckMenuItem::with_id(
+                app, "shortcuts-only", "Shortcuts only (hide edge bar)", true,
+                app.state::<Arc<AppState>>().settings.lock().unwrap().value.shortcuts_only,
+                None::<&str>,
+            )?;
+            app.manage(shortcuts_only.clone());
+            let menu = tauri::menu::Menu::with_items(app, &[&open, &shortcuts_only, &exit])?;
             let pixels =
                 image::load_from_memory(include_bytes!("../icons/32x32.png"))?.into_rgba8();
             let icon = tauri::image::Image::new_owned(pixels.into_raw(), 32, 32);
@@ -479,6 +487,17 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
                         let _ = shelf_window::action(app, "open");
+                    }
+                    "shortcuts-only" => {
+                        let state = app.state::<Arc<AppState>>();
+                        let mut next = state.settings.lock().unwrap().value.clone();
+                        next.shortcuts_only = !next.shortcuts_only;
+                        if let Err(error) = shortcuts::update(app, next) {
+                            let checked = state.settings.lock().unwrap().value.shortcuts_only;
+                            let _ = app.state::<tauri::menu::CheckMenuItem<tauri::Wry>>().set_checked(checked);
+                            state.shelf.lock().unwrap().view.error = Some(error);
+                            let _ = shelf_window::action(app, "open");
+                        }
                     }
                     "exit" => {
                         let state = app.state::<Arc<AppState>>();

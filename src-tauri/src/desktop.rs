@@ -59,8 +59,8 @@ pub fn delete_folder(window: WebviewWindow, app: AppHandle, id: String) -> Resul
     let state = app.state::<Arc<AppState>>();
     // Reset the destination first; a failed folder deletion only leaves new captures unfiled.
     let mut settings = state.settings.lock().unwrap().value.clone();
-    if settings.active_folder.as_deref() == Some(&id) {
-        settings.active_folder = None;
+    if settings.folder_ids().any(|f| f == id) {
+        settings.forget_folder(&id);
         shortcuts::update(&app, settings)?;
     }
     state.library.lock().unwrap().delete_folder(&id)?;
@@ -75,13 +75,43 @@ pub fn move_capture(
     folder_id: Option<String>,
 ) -> Result<()> {
     content_only(&window)?;
-    app.state::<Arc<AppState>>()
+    let state = app.state::<Arc<AppState>>();
+    let mut library = state.library.lock().unwrap();
+    library.move_capture(&id, folder_id.as_deref())?;
+    // Filing into a permanent folder also saves the file there (once).
+    let item = library.get(&id).cloned();
+    if let (Some(item), Some(dir)) = (item, library.export_dir(folder_id.as_deref(), None)) {
+        if !item.exported_path.as_deref().is_some_and(|p| p.starts_with(&dir)) {
+            if let Err(e) = library.auto_export(&id, &dir) {
+                drop(library);
+                changed(&app);
+                return Err(format!("Moved, but saving to the PC folder failed: {e}"));
+            }
+        }
+    }
+    drop(library);
+    changed(&app);
+    Ok(())
+}
+#[tauri::command]
+pub async fn create_permanent_folder(window: WebviewWindow, app: AppHandle) -> Result<Option<Folder>> {
+    crate::shelf_only(&window)?;
+    shelf_window::action(&app, "hold")?;
+    let picked = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
+        .set_title("Choose a folder on this PC")
+        .pick_folder()
+        .await;
+    let _ = shelf_window::action(&app, "release");
+    let Some(picked) = picked else { return Ok(None) };
+    let folder = app
+        .state::<Arc<AppState>>()
         .library
         .lock()
         .unwrap()
-        .move_capture(&id, folder_id.as_deref())?;
+        .create_permanent_folder(picked.path())?;
     changed(&app);
-    Ok(())
+    Ok(Some(folder))
 }
 #[tauri::command]
 pub async fn choose_capture_folder(

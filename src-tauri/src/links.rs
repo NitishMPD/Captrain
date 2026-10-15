@@ -186,9 +186,11 @@ pub fn start(app: &AppHandle) -> Result<()> {
         let result = read_address(HWND(target as *mut _)).and_then(|url| {
             let settings = state.settings.lock().unwrap().value.clone();
             let mut library = state.library.lock().unwrap();
-            let item = library.commit_url(&url, settings.active_folder.as_deref())?;
+            let item = library.commit_url(&url, settings.folder_for(crate::library::Kind::Url))?;
             let mut warning = None;
-            let item = if let Some(folder) = settings.capture_folder {
+            let export = library
+                .export_dir(item.folder_id.as_deref(), settings.capture_folder.as_deref());
+            let item = if let Some(folder) = export {
                 match library.auto_export(&item.id, &folder) {
                     Ok(exported) => exported,
                     Err(e) => {
@@ -210,11 +212,12 @@ pub fn start(app: &AppHandle) -> Result<()> {
             }
             Err(e) => (false, Some(e)),
         };
+        let shortcuts_only = state.settings.lock().unwrap().value.shortcuts_only;
         state
             .shelf
             .lock()
             .unwrap()
-            .finish(committed, error, Instant::now());
+            .finish(committed, error, Instant::now(), shortcuts_only);
         state.busy.store(false, Ordering::Release);
         state.timer.notify_one();
         crate::shelf_window::apply(&app, false);

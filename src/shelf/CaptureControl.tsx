@@ -12,13 +12,14 @@ interface Props {
   onPatch: (patch: Partial<Settings>) => void;
   onSettings: (settings: Settings) => void;
   onNewFolder: () => void;
+  onPcFolder: () => void;
   onRecord: () => void;
   recordingActive: boolean;
   onError: (message: string) => void;
 }
 
 /** Bottom dock: split capture button (run / choose type) and the destination folder. */
-export function CaptureControl({ settings, folders, onPatch, onSettings, onNewFolder, onRecord, recordingActive, onError }: Props) {
+export function CaptureControl({ settings, folders, onPatch, onSettings, onNewFolder, onPcFolder, onRecord, recordingActive, onError }: Props) {
   const captureMenu = useContextMenu();
   const destinationMenu = useContextMenu();
   const kind = settings?.captureKind ?? 'region';
@@ -53,6 +54,7 @@ export function CaptureControl({ settings, folders, onPatch, onSettings, onNewFo
     { label: 'No folder', checked: !active, onSelect: () => onPatch({ activeFolder: null }) },
     ...folders.map(f => ({ label: f.name, checked: f.id === active?.id, onSelect: () => onPatch({ activeFolder: f.id }) })),
     { label: 'New folder…', separatorBefore: true, onSelect: onNewFolder },
+    { label: 'Add PC folder…', onSelect: onPcFolder },
     { label: settings?.captureFolder ? 'Change save location…' : 'Choose save location…', separatorBefore: true,
       onSelect: () => native.chooseCaptureFolder().then(onSettings).catch(e => onError(errorMessage(e))) },
     ...(settings?.captureFolder ? [{ label: 'Open save location', onSelect: () => native.openCaptureFolder().catch(e => onError(errorMessage(e))) }] : []),

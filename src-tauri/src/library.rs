@@ -69,6 +69,9 @@ pub struct Item {
 pub struct Folder {
     pub id: String,
     pub name: String,
+    /// Set for a permanent folder: captures filed here are also saved into this PC directory.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
     #[serde(skip_deserializing, default)]
     pub count: usize,
 }
@@ -186,6 +189,36 @@ impl Library {
             .collect()
     }
     pub fn create_folder(&mut self, name: &str) -> Result<Folder> {
+        self.add_folder(name, None)
+    }
+    /// A folder backed by a real directory; named after it, with a suffix if that name is taken.
+    pub fn create_permanent_folder(&mut self, directory: &Path) -> Result<Folder> {
+        let directory = directory.canonicalize().map_err(err)?;
+        if !directory.is_dir() || directory.starts_with(self.root.canonicalize().map_err(err)?) {
+            return Err("Choose an existing folder outside Captrain's private library.".into());
+        }
+        if self.folders.iter().any(|f| f.path.as_deref() == Some(&directory)) {
+            return Err("That PC folder is already added.".into());
+        }
+        let base = directory
+            .file_name()
+            .map_or("Folder".into(), |n| n.to_string_lossy().into_owned());
+        let mut name = base.clone();
+        let mut n = 1;
+        while self.folders.iter().any(|f| f.name.to_lowercase() == name.to_lowercase()) {
+            n += 1;
+            name = format!("{base} ({n})");
+        }
+        self.add_folder(&name, Some(directory))
+    }
+    /// Where a capture filed in `folder` is saved on disk: that folder's own directory if permanent, else `fallback`.
+    pub fn export_dir(&self, folder: Option<&str>, fallback: Option<&Path>) -> Option<PathBuf> {
+        folder
+            .and_then(|id| self.folders.iter().find(|f| f.id == id))
+            .and_then(|f| f.path.clone())
+            .or_else(|| fallback.map(Path::to_path_buf))
+    }
+    fn add_folder(&mut self, name: &str, path: Option<PathBuf>) -> Result<Folder> {
         let name = valid_folder_name(name)?;
         if self
             .folders
@@ -197,6 +230,7 @@ impl Library {
         let folder = Folder {
             id: Uuid::new_v4().to_string(),
             name,
+            path,
             count: 0,
         };
         self.folders.push(folder.clone());
@@ -683,6 +717,9 @@ impl Library {
             })
             .map_err(err)
     }
+    pub fn get(&self, id: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.id == id)
+    }
     pub fn export_source(&self, id: &str) -> Result<(PathBuf, String)> {
         let i = self.find(id)?;
         Ok((self.path(i, false), i.filename.clone()))
@@ -814,6 +851,25 @@ mod tests {
         fs::remove_dir_all(exports).unwrap();
         assert_eq!(l.list("", 0, 20).total, 0);
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn permanent_folder_saves_to_its_own_directory() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let pc = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let fallback = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        fs::create_dir_all(&pc).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        let temp = library.create_folder("Temp").unwrap();
+        let perm = library.create_permanent_folder(&pc).unwrap();
+        assert!(library.create_permanent_folder(&pc).is_err());
+        assert!(library.create_permanent_folder(&root.join("captures")).is_err());
+        assert_eq!(library.export_dir(Some(&perm.id), Some(&fallback)), Some(pc.canonicalize().unwrap()));
+        assert_eq!(library.export_dir(Some(&temp.id), Some(&fallback)), Some(fallback.clone()));
+        assert_eq!(library.export_dir(None, None), None);
+        let reopened = Library::open(root.clone()).unwrap();
+        assert!(reopened.folders().iter().any(|f| f.path.is_some()));
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(pc).unwrap();
     }
     #[test]
     fn folders_migrate_legacy_and_ungroup_without_deleting_images() {

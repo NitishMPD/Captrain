@@ -17,6 +17,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut};
 pub struct Settings {
     pub edge: String,
     pub display: Option<String>,
+    #[serde(default = "edge_position_default")]
+    pub edge_position: f64,
+    #[serde(default)]
+    pub shortcuts_only: bool,
     pub shortcuts: BTreeMap<String, String>,
     #[serde(default)]
     pub capture_folder: Option<std::path::PathBuf>,
@@ -24,10 +28,53 @@ pub struct Settings {
     pub instant_capture: bool,
     #[serde(default = "kind_default")]
     pub capture_kind: crate::library::Kind,
+    /// Default destination folder; each capture type may override it in `destinations`.
     #[serde(default)]
     pub active_folder: Option<String>,
+    #[serde(default)]
+    pub destinations: Destinations,
     #[serde(default = "theme_default")]
     pub theme: String,
+}
+/// Per-type folder overrides; `None` means "use the default folder".
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Destinations {
+    pub image: Option<String>,
+    pub region: Option<String>,
+    pub link: Option<String>,
+    pub video: Option<String>,
+}
+impl Settings {
+    pub fn folder_for(&self, kind: crate::library::Kind) -> Option<&str> {
+        use crate::library::Kind;
+        let d = &self.destinations;
+        match kind {
+            Kind::Region => &d.region,
+            Kind::Window | Kind::Screen => &d.image,
+            Kind::Url => &d.link,
+            Kind::Video => &d.video,
+        }
+        .as_deref()
+        .or(self.active_folder.as_deref())
+    }
+    pub fn folder_ids(&self) -> impl Iterator<Item = &str> {
+        let d = &self.destinations;
+        [&self.active_folder, &d.image, &d.region, &d.link, &d.video]
+            .into_iter()
+            .filter_map(|f| f.as_deref())
+    }
+    pub fn forget_folder(&mut self, id: &str) {
+        let d = &mut self.destinations;
+        for slot in [&mut self.active_folder, &mut d.image, &mut d.region, &mut d.link, &mut d.video] {
+            if slot.as_deref() == Some(id) {
+                *slot = None;
+            }
+        }
+    }
+}
+fn edge_position_default() -> f64 {
+    0.5
 }
 fn theme_default() -> String {
     "system".into()
@@ -43,10 +90,13 @@ impl Default for Settings {
         Self {
             edge: "right".into(),
             display: None,
+            edge_position: edge_position_default(),
+            shortcuts_only: false,
             capture_folder: None,
             instant_capture: true,
             capture_kind: crate::library::Kind::Region,
             active_folder: None,
+            destinations: Destinations::default(),
             theme: theme_default(),
             shortcuts: [
                 ("region", "Ctrl+Alt+1"),
@@ -68,6 +118,9 @@ pub struct StoredSettings {
     pub warning: Option<String>,
 }
 pub fn validate(settings: &Settings) -> Result<BTreeMap<String, Shortcut>> {
+    if !settings.edge_position.is_finite() || !(0.0..=1.0).contains(&settings.edge_position) {
+        return Err("Edge position must be between zero and one.".into());
+    }
     if !["left", "right"].contains(&settings.edge.as_str()) {
         return Err("Choose the left or right edge.".into());
     }
@@ -203,7 +256,9 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
     let state = app.state::<Arc<AppState>>();
     {
         let library = state.library.lock().unwrap();
-        library.validate_folder(next.active_folder.as_deref())?;
+        for id in next.folder_ids() {
+            library.validate_folder(Some(id))?;
+        }
         if let Some(folder) = &next.capture_folder {
             if !folder.is_absolute() || !folder.is_dir() {
                 return Err("Choose an existing absolute save folder.".into());
@@ -263,6 +318,9 @@ pub fn update(app: &AppHandle, next: Settings) -> Result<Settings> {
         use tauri::Emitter;
         let _ = app.emit("settings-changed", &next);
     }
+    if let Some(item) = app.try_state::<tauri::menu::CheckMenuItem<tauri::Wry>>() {
+        let _ = item.set_checked(next.shortcuts_only);
+    }
     crate::shelf_window::apply(app, false);
     Ok(next)
 }
@@ -313,20 +371,38 @@ mod tests {
     fn previous_settings_gain_capture_defaults() {
         let mut json = serde_json::to_value(Settings::default()).unwrap();
         for field in [
+            "edgePosition",
+            "shortcutsOnly",
             "captureFolder",
             "instantCapture",
             "captureKind",
             "activeFolder",
+            "destinations",
             "theme",
         ] {
             json.as_object_mut().unwrap().remove(field);
         }
         let loaded: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.edge_position, 0.5);
+        assert!(!loaded.shortcuts_only);
         assert!(loaded.instant_capture);
         assert_eq!(loaded.capture_kind, crate::library::Kind::Region);
         assert!(loaded.capture_folder.is_none());
         assert!(loaded.active_folder.is_none());
+        assert!(loaded.folder_for(crate::library::Kind::Video).is_none());
         assert!(validate(&loaded).is_ok());
+    }
+    #[test]
+    fn rejects_invalid_edge_positions() {
+        let mut settings = Settings::default();
+        for position in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
+            settings.edge_position = position;
+            assert!(validate(&settings).is_err());
+        }
+        for position in [0.0, 0.5, 1.0] {
+            settings.edge_position = position;
+            assert!(validate(&settings).is_ok());
+        }
     }
     #[test]
     fn validates_duplicates_modifiers_and_actions() {

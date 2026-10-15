@@ -44,6 +44,7 @@ pub struct Shelf {
     previous: Mode,
     holds: u32,
     pub ready: bool,
+    pub dragging: bool,
     waiting_visible: bool,
 }
 impl Shelf {
@@ -59,6 +60,7 @@ impl Shelf {
             previous: Mode::Collapsed,
             holds: 0,
             ready: false,
+            dragging: false,
             waiting_visible: false,
         }
     }
@@ -137,8 +139,10 @@ impl Shelf {
         self.deadline = None;
         self.view.hovered = false;
     }
-    pub fn finish(&mut self, committed: bool, error: Option<String>, now: Instant) {
-        self.view.mode = if self.previous == Mode::Manual {
+    pub fn finish(&mut self, committed: bool, error: Option<String>, now: Instant, shortcuts_only: bool) {
+        self.view.mode = if shortcuts_only && (committed || error.is_some()) {
+            Mode::Temporary
+        } else if self.previous == Mode::Manual {
             Mode::Manual
         } else if committed || error.is_some() {
             Mode::Temporary
@@ -208,6 +212,80 @@ pub fn pointer_display() -> Result<DisplayInfo> {
         .find(|d| d.monitor.as_raw_hmonitor() == target.0)
         .ok_or("No display is available.".into())
 }
+fn edge_y(top: i32, bottom: i32, height: i32, position: f64) -> i32 {
+    top + ((bottom - top - height).max(0) as f64 * position.clamp(0.0, 1.0)).round() as i32
+}
+
+fn drag_position(work: &windows::Win32::Foundation::RECT, scale: f64, point: POINT, grab: f64) -> (&'static str, f64) {
+    let edge = if point.x - work.left < work.right - point.x { "left" } else { "right" };
+    let height = (72.0 * scale) as i32;
+    let travel = (work.bottom - work.top - height).max(0);
+    let position = if travel == 0 { 0.5 } else {
+        ((point.y - work.top) as f64 - height as f64 * grab) / travel as f64
+    };
+    (edge, position.clamp(0.0, 1.0))
+}
+
+#[tauri::command]
+pub async fn drag_shelf(window: tauri::WebviewWindow, app: AppHandle) -> Result<bool> {
+    crate::shelf_only(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        let state = app.state::<Arc<AppState>>();
+        state.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "Finish the current operation before moving the bar.".to_string())?;
+        let result = (|| {
+            {
+                let mut shelf = state.shelf.lock().unwrap();
+                if shelf.view.mode != Mode::Collapsed { return Ok(false); }
+                shelf.dragging = true;
+            }
+            let all = displays()?;
+            let mut start = POINT::default();
+            unsafe { GetCursorPos(&mut start).map_err(err)?; }
+            let origin = window.outer_position().map_err(err)?;
+            let size = window.outer_size().map_err(err)?;
+            let grab = ((start.y - origin.y) as f64 / size.height.max(1) as f64).clamp(0.0, 1.0);
+            let threshold = 5.0 * window.scale_factor().map_err(err)?;
+            let mut target = None;
+            while unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
+                let mut point = POINT::default();
+                unsafe { GetCursorPos(&mut point).map_err(err)?; }
+                if target.is_some() || ((point.x - start.x) as f64).hypot((point.y - start.y) as f64) >= threshold {
+                    let display = all.iter().min_by_key(|d| {
+                        let x = (point.x as i64 - point.x.clamp(d.bounds.left, d.bounds.right) as i64).abs();
+                        let y = (point.y as i64 - point.y.clamp(d.bounds.top, d.bounds.bottom) as i64).abs();
+                        x * x + y * y
+                    }).ok_or("No display is available.")?;
+                    let (edge, position) = drag_position(&display.work, display.scale, point, grab);
+                    let width = (16.0 * display.scale) as i32;
+                    let height = (72.0 * display.scale) as i32;
+                    let x = if edge == "left" { display.work.left } else { display.work.right - width };
+                    window.set_size(PhysicalSize::new(width as u32, height as u32)).map_err(err)?;
+                    window.set_position(PhysicalPosition::new(x, edge_y(display.work.top, display.work.bottom, height, position))).map_err(err)?;
+                    target = Some((display.id.clone(), edge.to_string(), position));
+                }
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            if let Some((display, edge, position)) = target {
+                let mut next = state.settings.lock().unwrap().value.clone();
+                next.display = Some(display);
+                next.edge = edge;
+                next.edge_position = position;
+                crate::shortcuts::update(&app, next)?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })();
+        state.shelf.lock().unwrap().dragging = false;
+        state.busy.store(false, Ordering::Release);
+        apply(&app, false);
+        result
+    }).await.map_err(err)?
+}
+
 pub fn apply(app: &AppHandle, activate: bool) {
     let state = app.state::<Arc<AppState>>();
     let shelf = state.shelf.lock().unwrap();
@@ -225,7 +303,14 @@ pub fn apply(app: &AppHandle, activate: bool) {
             return;
         }
         let state = app2.state::<Arc<AppState>>();
+        if state.shelf.lock().unwrap().dragging {
+            return;
+        }
         let settings = state.settings.lock().unwrap().value.clone();
+        if settings.shortcuts_only && view.mode == Mode::Collapsed {
+            let _ = window.hide();
+            return;
+        }
         let Ok(mut all) = displays() else {
             return;
         };
@@ -245,6 +330,8 @@ pub fn apply(app: &AppHandle, activate: bool) {
         let collapsed = view.mode == Mode::Collapsed;
         let (width, height) = if collapsed {
             (16.0, 72.0)
+        } else if settings.shortcuts_only && view.mode == Mode::Temporary {
+            (340.0, 120.0)
         } else {
             (540.0, 740.0)
         };
@@ -261,7 +348,7 @@ pub fn apply(app: &AppHandle, activate: bool) {
             d.work.right - width - inset
         }
         .clamp(d.work.left, d.work.right - width);
-        let y = (d.work.top + (d.work.bottom - d.work.top - height) / 2).max(d.work.top);
+        let y = edge_y(d.work.top, d.work.bottom, height, settings.edge_position);
         let _ = window.set_size(PhysicalSize::new(width as u32, height as u32));
         let _ = window.set_position(PhysicalPosition::new(x, y));
         if let Ok(handle) = window.hwnd() {
@@ -375,15 +462,46 @@ unsafe extern "system" fn display_proc(
 mod tests {
     use super::*;
     #[test]
+    fn edge_placement_clamps_to_work_area_and_handles_negative_monitors() {
+        use windows::Win32::Foundation::RECT;
+        let work = RECT { left: -1920, top: -200, right: 0, bottom: 880 };
+        assert_eq!(edge_y(-200, 880, 72, 0.0), -200);
+        assert_eq!(edge_y(-200, 880, 72, 1.0), 808);
+        assert_eq!(edge_y(-200, 880, 740, 0.5), -30);
+        assert_eq!(edge_y(0, 50, 72, 1.0), 0);
+        assert_eq!(drag_position(&work, 1.0, POINT { x: -1910, y: -500 }, 0.5), ("left", 0.0));
+        assert_eq!(drag_position(&work, 1.5, POINT { x: -10, y: 1000 }, 0.5), ("right", 1.0));
+    }
+    #[test]
+    fn shortcuts_only_capture_uses_temporary_toast_even_after_manual_open() {
+        let now = Instant::now();
+        let mut shelf = Shelf::new(None);
+        shelf.action("open", now).unwrap();
+        shelf.begin();
+        shelf.finish(true, None, now, true);
+        assert_eq!(shelf.view.mode, Mode::Temporary);
+        shelf.action("ready", now).unwrap();
+        assert!(shelf.expire(now + Duration::from_secs(3)));
+        assert_eq!(shelf.view.mode, Mode::Collapsed);
+        shelf.action("open", now).unwrap();
+        shelf.begin();
+        shelf.finish(false, None, now, true);
+        assert_eq!(shelf.view.mode, Mode::Manual);
+        shelf.begin();
+        shelf.finish(false, Some("Capture failed".into()), now, true);
+        assert_eq!(shelf.view.mode, Mode::Temporary);
+        assert_eq!(shelf.view.error.as_deref(), Some("Capture failed"));
+    }
+    #[test]
     fn obsolete_render_ready_cannot_arm_newer_reveal() {
         let now = Instant::now();
         let mut shelf = Shelf::new(None);
         shelf.action("ready", now).unwrap();
         shelf.begin();
-        shelf.finish(true, None, now);
+        shelf.finish(true, None, now, false);
         let old = shelf.view.reveal;
         shelf.begin();
-        shelf.finish(true, None, now);
+        shelf.finish(true, None, now, false);
         assert!(!shelf.action_for("ready", Some(old), now).unwrap());
         assert!(shelf.deadline.is_none());
         let current = shelf.view.reveal;
@@ -399,7 +517,7 @@ mod tests {
         let t = Instant::now();
         let mut s = Shelf::new(None);
         s.begin();
-        s.finish(true, None, t);
+        s.finish(true, None, t, false);
         assert!(!s.expire(t + Duration::from_secs(10)));
         s.action("ready", t).unwrap();
         assert!(!s.expire(t + Duration::from_millis(2999)));
@@ -408,20 +526,20 @@ mod tests {
         s.action("leave", t + Duration::from_secs(30)).unwrap();
         assert!(!s.expire(t + Duration::from_secs(32)));
         s.begin();
-        s.finish(true, None, t);
+        s.finish(true, None, t, false);
         s.action("ready", t + Duration::from_secs(32)).unwrap();
         assert!(!s.expire(t + Duration::from_secs(33)));
         assert!(s.expire(t + Duration::from_secs(35)));
         s.begin();
-        s.finish(true, None, t);
+        s.finish(true, None, t, false);
         s.action("interact", t).unwrap();
         assert!(!s.expire(t + Duration::from_secs(100)));
         s.begin();
-        s.finish(true, None, t);
+        s.finish(true, None, t, false);
         assert_eq!(s.view.mode, Mode::Manual);
         s.action("collapse", t).unwrap();
         s.begin();
-        s.finish(true, None, t);
+        s.finish(true, None, t, false);
         s.action("ready", t).unwrap();
         s.action("hold", t).unwrap();
         assert!(!s.expire(t + Duration::from_secs(10)));
@@ -435,7 +553,7 @@ mod tests {
             let mut s = Shelf::new(None);
             s.view.mode = mode;
             s.begin();
-            s.finish(false, None, t);
+            s.finish(false, None, t, false);
             assert_eq!(s.view.mode, mode);
         }
     }

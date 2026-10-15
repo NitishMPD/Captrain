@@ -118,10 +118,12 @@ export function Shelf(p: Props) {
 
   const folderMenu = (folder: Folder): MenuItem[] => [
     { label: filters.folderId === folder.id ? 'Show all captures' : 'Show this folder', onSelect: () => p.onFilters({ ...filters, folderId: filters.folderId === folder.id ? null : folder.id }) },
-    { label: settings?.activeFolder === folder.id ? 'Stop saving here' : 'Save new captures here', onSelect: () => p.onPatch({ activeFolder: settings?.activeFolder === folder.id ? null : folder.id }) },
+    { label: settings?.activeFolder === folder.id ? 'Stop using as default' : 'Use as default folder', onSelect: () => p.onPatch({ activeFolder: settings?.activeFolder === folder.id ? null : folder.id }) },
     { label: 'Rename…', separatorBefore: true, onSelect: () => setDialog({ name: 'rename', folder }) },
     { label: 'Delete folder…', danger: true, onSelect: () => setDialog({ name: 'delete-folder', folder }) },
   ];
+
+  const addPcFolder = () => native.createPermanentFolder().then(f => f && onChanged()).catch(report);
 
   const filtered = filters.query !== '' || filters.folderId !== null || filters.tab !== 'all';
   const closeDialog = () => setDialog(null);
@@ -149,13 +151,20 @@ export function Shelf(p: Props) {
                   onKeyDown={e => { if (e.key !== 'Escape') return; e.preventDefault(); if (input === '') setSearching(false); else setInput(''); }}
                   placeholder="Search URL, name, kind or date" aria-label="Search library" />
               : <span className="spacer" />}
-            <button className="icon-btn" onClick={() => setDialog({ name: 'new-folder' })} aria-label="New folder"><Icon name="folderPlus" /></button>
+            <button className="icon-btn" onClick={() => setDialog({ name: 'new-folder' })} aria-label="New folder" title="New folder"><Icon name="folderPlus" /></button>
+            <button className="icon-btn" onClick={addPcFolder} aria-label="Add PC folder" title="Add a folder from this PC"><Icon name="folderPc" /></button>
             <button className="icon-btn" aria-pressed={searching} aria-label={searching ? 'Close search' : 'Search'}
               onClick={() => { if (searching) { setInput(''); } setSearching(!searching); }}><Icon name="search" /></button>
           </div>
+          {filters.tab === 'exports' && (
+            <FolderTabs folders={folders.filter(f => f.path)} selected={filters.folderId} active={settings?.activeFolder ?? null} layout={layout} emptyLabel="Add a folder from this PC to save captures into"
+              onSelect={id => p.onFilters({ ...filters, folderId: id })} onCreate={addPcFolder} menuFor={folderMenu}
+              onDropItem={(id, folderId) => { const item = items.find(i => i.id === id); if (item && item.folderId !== folderId) move(item, folderId); }} />
+          )}
           {filters.tab === 'all' && (
             <FolderTabs folders={folders} selected={filters.folderId} active={settings?.activeFolder ?? null}
-              onSelect={id => p.onFilters({ ...filters, folderId: id })} onCreate={() => setDialog({ name: 'new-folder' })} menuFor={folderMenu} />
+              onSelect={id => p.onFilters({ ...filters, folderId: id })} onCreate={() => setDialog({ name: 'new-folder' })} menuFor={folderMenu}
+              onDropItem={(id, folderId) => { const item = items.find(i => i.id === id); if (item && item.folderId !== folderId) move(item, folderId); }} />
           )}
           <main className="body" ref={body}>
             {p.error ? <p className="empty">{p.error}</p>
@@ -171,7 +180,7 @@ export function Shelf(p: Props) {
           <p className="toast" role="status">{toast}</p>
         </div>
         <CaptureControl recordingActive={p.recordingActive} settings={settings} folders={folders} onPatch={p.onPatch} onSettings={p.onSettingsSaved}
-          onRecord={p.onRecord} onNewFolder={() => setDialog({ name: 'new-folder' })} onError={onError} />
+          onRecord={p.onRecord} onNewFolder={() => setDialog({ name: 'new-folder' })} onPcFolder={addPcFolder} onError={onError} />
       </div>
       {dialog?.name === 'new-folder' && (
         <NameDialog title="New folder" submit="Create" onCancel={closeDialog}
@@ -183,7 +192,7 @@ export function Shelf(p: Props) {
       )}
       {dialog?.name === 'delete-folder' && (
         <ConfirmDialog title={`Delete “${dialog.folder.name}”?`} confirm="Delete folder" busy={busy} onCancel={closeDialog}
-          body="The folder is removed. Its captures stay in your library without a folder."
+          body={dialog.folder.path ? 'The folder is removed from Captrain. Its captures stay in your library, and files already saved on your PC are kept.' : 'The folder is removed. Its captures stay in your library without a folder.'}
           onConfirm={() => run(async () => {
             await native.deleteFolder(dialog.folder.id);
             if (filters.folderId === dialog.folder.id) p.onFilters({ ...filters, folderId: null });

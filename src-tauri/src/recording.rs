@@ -117,10 +117,16 @@ pub fn open_setup(app: &AppHandle) -> Result<()> {
     if state.busy.load(Ordering::Acquire) && !active {
         return Err("Finish the current operation before opening video setup.".into());
     }
-    shelf_window::action(app, "open")?;
-    if !active {
-        app.emit_to("shelf", "open-recording", ()).map_err(err)?;
+    if active {
+        // Same shortcut toggles: pressing it mid-recording stops it. A full queue means a stop is already pending.
+        let session = state.video.lock().unwrap();
+        if let Some(control) = session.control.as_ref() {
+            let _ = control.try_send("stop".into());
+        }
+        return Ok(());
     }
+    shelf_window::action(app, "open")?;
+    app.emit_to("shelf", "open-recording", ()).map_err(err)?;
     Ok(())
 }
 fn publish(app: &AppHandle, state: &AppState, view: View) {
@@ -269,7 +275,7 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
     {
         let settings = state.settings.lock().unwrap();
         let library = state.library.lock().unwrap();
-        library.validate_recording(settings.value.active_folder.as_deref())?;
+        library.validate_recording(settings.value.folder_for(Kind::Video))?;
     }
     state
         .busy
@@ -321,7 +327,7 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
             // Keep a visible, capture-excluded shelf bar available to reopen the controls.
             {
                 let mut shelf = state.shelf.lock().unwrap();
-                shelf.finish(false, None, Instant::now());
+                shelf.finish(false, None, Instant::now(), false);
                 shelf.action("collapse", Instant::now())?;
             }
             shelf_window::apply(&app, false);
@@ -362,11 +368,12 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
             run(&app, &state, &options, config, rx)?;
             let mut library = state.library.lock().unwrap();
             let folder = settings
-                .active_folder
-                .as_deref()
+                .folder_for(Kind::Video)
                 .filter(|f| library.validate_folder(Some(f)).is_ok());
             let mut item = library.commit_video(&id, ow, oh, folder)?;
-            if let Some(directory) = settings.capture_folder {
+            let export = library
+                .export_dir(item.folder_id.as_deref(), settings.capture_folder.as_deref());
+            if let Some(directory) = export {
                 match library.auto_export(&item.id, &directory) {
                     Ok(exported) => item = exported,
                     Err(e) => {
@@ -410,11 +417,12 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
                 ..Default::default()
             },
         );
+        let shortcuts_only = state.settings.lock().unwrap().value.shortcuts_only;
         state
             .shelf
             .lock()
             .unwrap()
-            .finish(committed, error, Instant::now());
+            .finish(committed, error, Instant::now(), shortcuts_only);
         state.busy.store(false, Ordering::Release);
         state.timer.notify_one();
         shelf_window::apply(&app, false);

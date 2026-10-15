@@ -521,12 +521,15 @@ fn commit(app: &AppHandle, state: &Arc<AppState>, kind: Kind, image: DynamicImag
             .library
             .lock()
             .unwrap()
-            .commit(kind, image, settings.active_folder.as_deref());
+            .commit(kind, image, settings.folder_for(kind));
     match result {
         Ok(mut item) => {
             let mut warning = None;
-            if let Some(folder) = settings.capture_folder {
-                match state.library.lock().unwrap().auto_export(&item.id, &folder) {
+            let mut library = state.library.lock().unwrap();
+            if let Some(folder) =
+                library.export_dir(item.folder_id.as_deref(), settings.capture_folder.as_deref())
+            {
+                match library.auto_export(&item.id, &folder) {
                     Ok(exported) => item = exported,
                     Err(e) => {
                         warning = Some(format!(
@@ -555,11 +558,12 @@ pub fn finish(app: &AppHandle, state: &Arc<AppState>, committed: bool, error: Op
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.destroy();
     }
+    let shortcuts_only = state.settings.lock().unwrap().value.shortcuts_only;
     state
         .shelf
         .lock()
         .unwrap()
-        .finish(committed, error, Instant::now());
+        .finish(committed, error, Instant::now(), shortcuts_only);
     state.timer.notify_one();
     state.busy.store(false, Ordering::Release);
     shelf_window::apply(app, false);
