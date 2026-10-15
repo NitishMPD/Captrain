@@ -1,5 +1,11 @@
 # Tasks - 15 October 2026
 
+## Release folder-link validation fix
+
+- Reproduced the release test failure: URL normalization discarded the device host in `file://./C:/folder` before validation could reject it.
+- Reject file-URL syntax violations during parsing in the shared native validator. Added regression cases for encoded device hosts, discarded network hosts and backslash syntax, plus valid localhost coverage. Updated design.md.
+- Verification: `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` passed (29 passed, 2 live browser/Explorer tests ignored). No app/installer build, branch, push or deployment; live interaction remains unverified.
+
 ## Browser URL saving, appearance and Windows startup
 
 - Added Ctrl+Alt+4 (editable in Settings) and a shelf link button to save a page from Chrome, Edge or Brave without an extension, keystroke injection or clipboard replacement. Windows UI Automation reads visible document metadata, with an address-bar fallback; unsupported or ambiguous pages fail visibly.

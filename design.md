@@ -58,4 +58,6 @@ Installed release apps check the public NitishMPD/Captrain GitHub feed 10 second
 
 ## Verification boundary
 
+Folder-link validation rejects file-URL syntax violations before URL normalization can discard a host and reinterpret the target as a local drive. Canonical drive, UNC and localhost file URLs remain supported.
+
 Development compilation and native tests authorized by Nitish for this implementation. Release builds, branches, pushes and deployment remain excluded. Native visual/focus/DPI/HDR and performance results must be recorded as measured or unverified, never inferred from browser checks.

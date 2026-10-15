@@ -62,7 +62,15 @@ pub fn validate_link(value: &str) -> Result<String> {
     if value.len() > 32768 || value.chars().any(char::is_control) {
         return Err("This Windows path is invalid.".into());
     }
-    let url = tauri::Url::parse(value).map_err(err)?;
+    // Reject malformed file URLs before normalization can discard a device host.
+    let invalid = std::cell::Cell::new(false);
+    let url = tauri::Url::options()
+        .syntax_violation_callback(Some(&|_| invalid.set(true)))
+        .parse(value)
+        .map_err(err)?;
+    if invalid.get() {
+        return Err("This Windows path is invalid.".into());
+    }
     let path = url
         .to_file_path()
         .map_err(|_| "Choose an absolute Windows folder path.")?;
@@ -402,12 +410,19 @@ mod tests {
             link_text("file://server/share/My%20Projects").unwrap(),
             r"\\server\share\My Projects"
         );
+        assert_eq!(
+            link_text("file://localhost/C:/folder").unwrap(),
+            r"C:\folder"
+        );
         for invalid in [
             "file:///relative",
             "file:///C:/folder?query=1",
             "file:///C:/folder#fragment",
             "file:///C:/folder%0Aevil",
             "file://./C:/folder",
+            "file://%2e/C:/folder",
+            "file://server/C:/folder",
+            r"file://.\C:/folder",
             "javascript:alert(1)",
         ] {
             assert!(validate_link(invalid).is_err(), "{invalid}");
