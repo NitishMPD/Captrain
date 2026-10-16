@@ -147,6 +147,49 @@ async fn delete_capture(
     Ok(())
 }
 #[tauri::command]
+async fn save_selected(
+    window: WebviewWindow,
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<Option<library::BatchResult>> {
+    shelf_only(&window)?;
+    let state = app.state::<Arc<AppState>>().inner().clone();
+    {
+        let library = state.library.lock().unwrap();
+        for id in &ids {
+            library.export_source(id)?;
+        }
+    }
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    shelf_window::action(&app, "hold")?;
+    let picked = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
+        .set_title("Save selected items to folder")
+        .pick_folder()
+        .await;
+    let result = if let Some(picked) = picked {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = state
+                .library
+                .lock()
+                .unwrap()
+                .save_unexported(&ids, picked.path());
+            desktop::changed(&app);
+            result.map(Some)
+        })
+        .await
+        .map_err(err)
+        .and_then(|result| result)
+    } else {
+        Ok(None)
+    };
+    let _ = shelf_window::action(&app, "release");
+    result
+}
+#[tauri::command]
 async fn save_capture(
     window: WebviewWindow,
     app: AppHandle,
@@ -406,6 +449,7 @@ pub fn run() {
             capture_image,
             copy_capture,
             save_capture,
+            save_selected,
             delete_capture,
             get_settings,
             update_settings,

@@ -182,7 +182,7 @@ fn source_is_explorer(hwnd: HWND) -> Result<bool> {
     }
 }
 
-fn read_address(hwnd: HWND) -> Result<String> {
+fn read_address(hwnd: HWND) -> Result<(String, Option<String>)> {
     let explorer = source_is_explorer(hwnd)?;
     unsafe {
         CoInitializeEx(
@@ -196,9 +196,9 @@ fn read_address(hwnd: HWND) -> Result<String> {
         .ok()
         .map_err(err)?;
         // All UI Automation interfaces are dropped before the COM apartment is released.
-        let result = (|| -> Result<String> {
+        let result = (|| -> Result<(String, Option<String>)> {
             if explorer {
-                return explorer_address(hwnd);
+                return explorer_address(hwnd).map(|url| (url, None));
             }
             let automation: IUIAutomation =
                 CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER).map_err(err)?;
@@ -206,6 +206,14 @@ fn read_address(hwnd: HWND) -> Result<String> {
             timeouts.SetConnectionTimeout(2000).map_err(err)?;
             timeouts.SetTransactionTimeout(2000).map_err(err)?;
             let root = automation.ElementFromHandle(hwnd).map_err(err)?;
+            let window_title = root.CurrentName().ok().map(|name| {
+                let name = name.to_string();
+                name.strip_suffix(" - Google Chrome")
+                    .or_else(|| name.strip_suffix(" - Microsoft Edge"))
+                    .or_else(|| name.strip_suffix(" - Brave"))
+                    .unwrap_or(&name)
+                    .to_string()
+            });
             let walker = automation.ControlViewWalker().map_err(err)?;
             let mut pending = vec![(root, false)];
             let mut urls = Vec::new();
@@ -230,7 +238,8 @@ fn read_address(hwnd: HWND) -> Result<String> {
                     {
                         if let Ok(value) = pattern.CurrentValue() {
                             if let Ok(url) = validate_url(&value.to_string()) {
-                                documents.push(url);
+                                let title = element.CurrentName().ok().map(|name| name.to_string());
+                                documents.push((url, title));
                             }
                         }
                     }
@@ -281,7 +290,7 @@ fn read_address(hwnd: HWND) -> Result<String> {
             if urls.len() != 1 {
                 return Err("Could not read a unique web address. Finish loading the page, focus its address bar (Ctrl+L), then retry Save link. Internal browser pages are not supported.".into());
             }
-            Ok(urls.remove(0))
+            Ok((urls.remove(0), window_title))
         })();
         CoUninitialize();
         result
@@ -299,10 +308,14 @@ pub fn start(app: &AppHandle) -> Result<()> {
     state.shelf.lock().unwrap().begin();
     state.timer.notify_one();
     std::thread::spawn(move || {
-        let result = read_address(HWND(target as *mut _)).and_then(|url| {
+        let result = read_address(HWND(target as *mut _)).and_then(|(url, title)| {
             let settings = state.settings.lock().unwrap().value.clone();
             let mut library = state.library.lock().unwrap();
-            let item = library.commit_url(&url, settings.folder_for(crate::library::Kind::Url))?;
+            let item = library.commit_url(
+                &url,
+                title.as_deref(),
+                settings.folder_for(crate::library::Kind::Url),
+            )?;
             let mut warning = None;
             let export = library.export_dir(
                 item.folder_id.as_deref(),
@@ -397,7 +410,7 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
-        let url = read_address(HWND(target as *mut _)).unwrap();
+        let (url, _) = read_address(HWND(target as *mut _)).unwrap();
         assert!(validate_url(&url).is_ok());
     }
     #[test]
@@ -436,7 +449,7 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
-        let url = read_address(HWND(target as *mut _)).unwrap();
+        let (url, _) = read_address(HWND(target as *mut _)).unwrap();
         assert!(url.starts_with("file:"));
         assert!(validate_link(&url).is_ok());
     }

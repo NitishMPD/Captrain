@@ -30,6 +30,8 @@ interface Props {
   freshId?: string | null;
   onOpen: (item: CaptureItem) => void;
   menuFor: (item: CaptureItem) => MenuItem[];
+  selection?: ReadonlySet<string> | null;
+  disabled?: boolean;
 }
 
 /** Drag payload type: a capture id dropped onto a folder tile. */
@@ -50,15 +52,16 @@ function dragPreview(transfer: DataTransfer, row: HTMLElement) {
   requestAnimationFrame(() => ghost.remove());
 }
 
-export function CaptureList({ items, thumbs, layout, freshId, onOpen, menuFor }: Props) {
+export function CaptureList({ items, thumbs, layout, freshId, onOpen, menuFor, selection, disabled }: Props) {
   const { menu, bind } = useContextMenu();
   return (
     <>
       <ul className={layout === 'grid' ? 'grid' : 'list'}>
         {items.map(item => (
           <li key={item.id}>
-            <button draggable onDragStart={e => { e.dataTransfer.setData(DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; dragPreview(e.dataTransfer, e.currentTarget); }} className={`row${item.id === freshId ? ' fresh' : ''}${item.kind === 'url' ? ' link-row' : ''}`} onClick={() => onOpen(item)} {...bind(() => menuFor(item))}
-              aria-haspopup="menu" aria-label={`${item.kind === 'url' ? `${linkTitle(item)}, ${linkAddress(item.url)}` : item.filename}, ${kindLabel(item.kind)}, ${formatTime(item.createdAt)}, ${item.kind === 'url' ? linkOpenLabel(item) : `${item.width} by ${item.height} pixels`}`}>
+            <button disabled={disabled} role={selection ? 'checkbox' : undefined} aria-checked={selection ? selection.has(item.id) : undefined} draggable={!selection} onDragStart={e => { e.dataTransfer.setData(DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; dragPreview(e.dataTransfer, e.currentTarget); }} className={`row${item.id === freshId ? ' fresh' : ''}${item.kind === 'url' ? ' link-row' : ''}`} onClick={() => onOpen(item)} {...bind(() => menuFor(item))}
+              aria-haspopup="menu" aria-label={`${item.kind === 'url' ? `${linkTitle(item)}, ${linkAddress(item.url)}` : item.filename}, ${kindLabel(item.kind)}, ${formatTime(item.createdAt)}, ${selection ? 'Toggle selection' : item.kind === 'url' ? linkOpenLabel(item) : `${item.width} by ${item.height} pixels`}`}>
+              {selection && <span className="selection-check" aria-hidden="true">{selection.has(item.id) && <Icon name="check" />}</span>}
               <span className="thumb" data-thumb={item.id}>
                 {(item.kind === 'url' || item.kind === 'video') && <Icon name={item.kind === 'video' ? 'video' : item.url?.startsWith('file:') ? 'folder' : 'link'} />}
                 {thumbs[item.id] && <img src={thumbs[item.id]} alt="" draggable={false} />}

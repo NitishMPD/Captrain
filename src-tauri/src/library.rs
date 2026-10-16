@@ -22,6 +22,43 @@ fn valid_link_title(value: &str) -> Result<String> {
     Ok(title.to_string())
 }
 
+fn link_filename(title: &str) -> String {
+    let name: String = title
+        .chars()
+        .take(100)
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let name = name.trim_matches([' ', '.']);
+    let base = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    let reserved = matches!(
+        base.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        base.strip_prefix(prefix).is_some_and(|n| {
+            matches!(
+                n,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    });
+    format!(
+        "{}{}.url",
+        if reserved { "_" } else { "" },
+        if name.is_empty() { "Link" } else { name }
+    )
+}
+
 pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -112,6 +149,12 @@ impl StoredIndex {
 pub struct Page {
     pub items: Vec<Item>,
     pub total: usize,
+}
+
+#[derive(Default, Serialize)]
+pub struct BatchResult {
+    pub completed: Vec<String>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -357,11 +400,31 @@ impl Library {
                 .and_then(|e| e.to_str())
                 .ok_or("Capture has no extension.")?
         ));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)
-            .map_err(err)?;
+        let named_link = self.find(id)?.kind == Kind::Url;
+        let mut destination = if named_link {
+            directory.join(&filename)
+        } else {
+            destination
+        };
+        let mut attempt = 1u64;
+        let mut file = loop {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&destination)
+            {
+                Ok(file) => break file,
+                Err(e) if named_link && e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    attempt += 1;
+                    let stem = Path::new(&filename)
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    destination = directory.join(format!("{stem} ({attempt}).url"));
+                }
+                Err(e) => return Err(err(e)),
+            }
+        };
         let write = (|| {
             std::io::copy(&mut File::open(source).map_err(err)?, &mut file).map_err(err)?;
             file.sync_all().map_err(err)
@@ -378,6 +441,29 @@ impl Library {
                 destination.display()
             )
         })
+    }
+    pub fn save_unexported(&mut self, ids: &[String], directory: &Path) -> Result<BatchResult> {
+        for id in ids {
+            self.find(id)?;
+        }
+        let mut result = BatchResult::default();
+        let mut seen = std::collections::HashSet::new();
+        for id in ids {
+            if !seen.insert(id) {
+                continue;
+            }
+            let item = self.find(id)?;
+            let name = item.title.as_deref().unwrap_or(&item.filename).to_owned();
+            if item.exported_path.is_some() {
+                result.completed.push(id.clone());
+                continue;
+            }
+            match self.auto_export(id, directory) {
+                Ok(_) => result.completed.push(id.clone()),
+                Err(e) => result.errors.push(format!("{name}: {e}")),
+            }
+        }
+        Ok(result)
     }
     pub fn open(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("captures")).map_err(err)?;
@@ -684,8 +770,42 @@ impl Library {
         }
         Ok(item)
     }
-    pub fn commit_url(&mut self, url: &str, folder: Option<&str>) -> Result<Item> {
+    pub fn commit_url(
+        &mut self,
+        url: &str,
+        title: Option<&str>,
+        folder: Option<&str>,
+    ) -> Result<Item> {
         let url = crate::links::validate_link(url)?;
+        let parsed = tauri::Url::parse(&url).map_err(err)?;
+        let fallback = if parsed.scheme() == "file" {
+            let path = parsed
+                .to_file_path()
+                .map_err(|_| "This Windows path is invalid.")?;
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            parsed.host_str().unwrap_or("Link").to_string()
+        };
+        let title = title
+            .unwrap_or(&fallback)
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect::<String>();
+        let title: String = title
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(120)
+            .collect();
+        let title = if title.trim().is_empty() {
+            fallback.chars().take(120).collect()
+        } else {
+            title.trim().to_string()
+        };
         if !self.writable {
             return Err("Capture index needs recovery; existing data was left untouched.".into());
         }
@@ -697,11 +817,11 @@ impl Library {
             created_at: now.to_rfc3339(),
             width: 0,
             height: 0,
-            filename: format!("Captrain-link-{}.url", now.format("%Y%m%d-%H%M%S")),
+            filename: link_filename(&title),
             folder_id: folder.map(String::from),
             exported_path: None,
             url: Some(url.clone()),
-            title: None,
+            title: Some(title),
         };
         let path = self.path(&item, false);
         atomic_write(
@@ -769,7 +889,16 @@ impl Library {
     }
     pub fn export_source(&self, id: &str) -> Result<(PathBuf, String)> {
         let i = self.find(id)?;
-        Ok((self.path(i, false), i.filename.clone()))
+        let filename = if i.kind == Kind::Url {
+            let fallback = Path::new(&i.filename)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy();
+            link_filename(i.title.as_deref().unwrap_or(&fallback))
+        } else {
+            i.filename.clone()
+        };
+        Ok((self.path(i, false), filename))
     }
     pub fn delete(&mut self, id: &str) -> Result<()> {
         if !self.writable {
@@ -864,9 +993,9 @@ mod tests {
         let mut l = Library::open(root.clone()).unwrap();
         let folder = l.create_folder("Research").unwrap();
         let item = l
-            .commit_url("https://example.com/path?q=one#two", Some(&folder.id))
+            .commit_url("https://example.com/path?q=one#two", None, Some(&folder.id))
             .unwrap();
-        assert!(l.commit_url("javascript:alert(1)", None).is_err());
+        assert!(l.commit_url("javascript:alert(1)", None, None).is_err());
         assert_eq!(l.list("example", 0, 20).total, 1);
         assert_eq!(
             l.list_content("", 0, 20, None, false, Content::Images)
@@ -908,7 +1037,9 @@ mod tests {
             .unwrap()
             .to_string();
         let mut library = Library::open(root.clone()).unwrap();
-        let item = library.commit_url(&url, None).unwrap();
+        let item = library.commit_url(&url, None, None).unwrap();
+        assert_eq!(item.title.as_deref(), Some("My Projects"));
+        assert_eq!(item.filename, "My Projects.url");
         library.rename_link(&item.id, "Game source").unwrap();
         let mut library = Library::open(root.clone()).unwrap();
         assert_eq!(
@@ -936,16 +1067,115 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn captured_names_persist_and_exports_do_not_overwrite() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let exports = root.with_extension("exports");
+        fs::create_dir(&exports).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library
+            .commit_url(
+                "https://example.com/page",
+                Some("  Actual page: title?  "),
+                None,
+            )
+            .unwrap();
+        assert_eq!(item.title.as_deref(), Some("Actual page: title?"));
+        assert_eq!(item.filename, "Actual page_ title_.url");
+        let mut library = Library::open(root.clone()).unwrap();
+        assert_eq!(library.get(&item.id).unwrap().title, item.title);
+        assert_eq!(library.list("Actual page", 0, 20).total, 1);
+        let first = library
+            .auto_export(&item.id, &exports)
+            .unwrap()
+            .exported_path
+            .unwrap();
+        let second = library
+            .auto_export(&item.id, &exports)
+            .unwrap()
+            .exported_path
+            .unwrap();
+        assert_eq!(first.file_name().unwrap(), "Actual page_ title_.url");
+        assert_eq!(second.file_name().unwrap(), "Actual page_ title_ (2).url");
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
+        library.rename_link(&item.id, "New name").unwrap();
+        assert_eq!(library.export_source(&item.id).unwrap().1, "New name.url");
+        assert!(first.is_file());
+        let fallback = library
+            .commit_url("https://example.com/", Some("\n\t"), None)
+            .unwrap();
+        assert_eq!(fallback.title.as_deref(), Some("example.com"));
+        let long = library
+            .commit_url("https://example.com/", Some(&"🦀".repeat(200)), None)
+            .unwrap();
+        assert_eq!(long.title.unwrap().chars().count(), 120);
+        for (title, filename) in [
+            ("CON", "_CON.url"),
+            ("CON .txt", "_CON .txt.url"),
+            ("aux.txt", "_aux.txt.url"),
+            ("LPT¹", "_LPT¹.url"),
+            ("../", "_.url"),
+            ("...", "Link.url"),
+        ] {
+            assert_eq!(link_filename(title), filename);
+        }
+        fs::remove_dir_all(exports).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn batch_save_skips_exports_validates_ids_and_reports_failures() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let exports = root.with_extension("exports");
+        fs::create_dir(&exports).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        let first = library
+            .commit_url("https://example.com/one", Some("Same name"), None)
+            .unwrap();
+        let second = library
+            .commit_url("https://example.com/two", Some("Same name"), None)
+            .unwrap();
+        assert!(library
+            .save_unexported(&[first.id.clone(), "foreign".into()], &exports)
+            .is_err());
+        assert_eq!(fs::read_dir(&exports).unwrap().count(), 0);
+        let failure = library
+            .save_unexported(
+                &[first.id.clone(), second.id.clone()],
+                &exports.join("missing"),
+            )
+            .unwrap();
+        assert_eq!(failure.errors.len(), 2);
+        assert!(failure.completed.is_empty());
+        assert!(library.get(&first.id).unwrap().exported_path.is_none());
+        library.auto_export(&first.id, &exports).unwrap();
+        let result = library
+            .save_unexported(
+                &[first.id.clone(), second.id.clone(), second.id.clone()],
+                &exports,
+            )
+            .unwrap();
+        assert_eq!(result.completed, vec![first.id, second.id]);
+        assert!(result.errors.is_empty());
+        assert_eq!(fs::read_dir(&exports).unwrap().count(), 2);
+        assert!(exports.join("Same name.url").is_file());
+        assert!(exports.join("Same name (2).url").is_file());
+        fs::remove_dir_all(exports).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn web_link_names_survive_reload_and_legacy_items_need_no_migration() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let mut library = Library::open(root.clone()).unwrap();
-        let item = library.commit_url("https://example.com/", None).unwrap();
+        let item = library
+            .commit_url("https://example.com/", None, None)
+            .unwrap();
         let mut index: serde_json::Value =
             serde_json::from_slice(&fs::read(root.join("index.json")).unwrap()).unwrap();
         index["items"][0].as_object_mut().unwrap().remove("title");
+        index["items"][0]["filename"] = "../../outside.url".into();
         fs::write(root.join("index.json"), serde_json::to_vec(&index).unwrap()).unwrap();
         let mut library = Library::open(root.clone()).unwrap();
         assert!(library.get(&item.id).unwrap().title.is_none());
+        assert_eq!(library.export_source(&item.id).unwrap().1, "outside.url");
         library.rename_link(&item.id, "Reference").unwrap();
         let library = Library::open(root.clone()).unwrap();
         assert_eq!(

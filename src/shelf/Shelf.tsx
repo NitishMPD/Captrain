@@ -3,9 +3,10 @@ import { ConfirmDialog, NameDialog } from '../Dialogs';
 import { useContextMenu, type MenuItem } from '../ContextMenu';
 import { Icon } from '../Icon';
 import { CaptureList, linkTitle, linkOpenLabel, type Layout } from '../library/CaptureList';
-import { native, type CaptureItem, type Folder, type Settings } from '../native';
+import { native, type BatchResult, type CaptureItem, type Folder, type Settings } from '../native';
+import { applyToSelection } from '../library/selection';
 import { formatShortcut } from '../settings/shortcut';
-import { errorMessage } from '../util';
+import { errorMessage, useHold } from '../util';
 import { CaptureControl } from './CaptureControl';
 import { FolderTabs } from './FolderTabs';
 import { fly } from './flight';
@@ -21,6 +22,7 @@ type Dialog =
   | { name: 'rename'; folder: Folder }
   | { name: 'rename-link'; item: CaptureItem }
   | { name: 'delete-folder'; folder: Folder }
+  | { name: 'delete-selected'; items: CaptureItem[] }
   | { name: 'delete'; item: CaptureItem };
 
 interface Props {
@@ -63,15 +65,20 @@ export function Shelf(p: Props) {
   const [input, setInput] = useState(filters.query);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selection, setSelection] = useState<Set<string> | null>(null);
+  const operation = useRef(false);
+  useHold(busy || selection !== null);
   const [toast, setToast] = useState('');
   const folders = useFolders(p.rev, onError);
   const newMenu = useContextMenu();
+  const selectionMenu = useContextMenu();
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLElement>(null);
   const played = useRef<string | null>(null);
   const flight = useRef<(() => void) | null>(null);
 
   useEffect(() => { setInput(filters.query); }, [filters.query]);
+  useEffect(() => { setSelection(null); }, [filters.tab, filters.folderId, filters.query]);
   useEffect(() => {
     const t = setTimeout(() => { if (input.trim() !== filters.query) p.onFilters({ ...filters, query: input.trim() }); }, 200);
     return () => clearTimeout(t);
@@ -100,14 +107,51 @@ export function Shelf(p: Props) {
   const report = useCallback((e: unknown) => onError(errorMessage(e)), [onError]);
 
   const run = async (task: () => Promise<void>) => {
+    if (operation.current) return;
+    operation.current = true;
     setBusy(true);
-    try { await task(); } catch (e) { report(e); } finally { setBusy(false); }
+    try { await task(); } catch (e) { report(e); } finally { operation.current = false; setBusy(false); }
   };
+
+  const selectedItems = items.filter(item => selection?.has(item.id));
+  const unsavedItems = selectedItems.filter(item => !item.exportedPath);
+  const toggleSelection = (item: CaptureItem) => setSelection(previous => {
+    const next = new Set(previous);
+    if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+    return next;
+  });
+  const finishBatch = (result: BatchResult) => {
+    const completed = new Set(result.completed);
+    setSelection(previous => previous && new Set([...previous].filter(id => !completed.has(id))));
+    onChanged();
+    if (result.errors.length) onError(`${result.completed.length} completed; ${result.errors.length} failed. ${result.errors.join('\n')}`);
+    else setToast(`${result.completed.length} completed`);
+  };
+  const moveSelected = (folderId: string | null) => run(async () => {
+    finishBatch(await applyToSelection(selectedItems, id => native.moveCapture(id, folderId)));
+  });
+  const saveSelected = () => run(async () => {
+    const result = await native.saveSelected(unsavedItems.map(item => item.id));
+    if (result) finishBatch(result);
+  });
+  const batchMenu = (): MenuItem[] => [
+    { label: 'Move to folder', disabled: busy || !selectedItems.length, submenu: [
+      { label: 'No folder', onSelect: () => { void moveSelected(null); } },
+      ...folders.map(f => ({ label: f.name, onSelect: () => { void moveSelected(f.id); } })),
+    ] },
+    { label: `Save unsaved (${unsavedItems.length})…`, disabled: busy || !unsavedItems.length, onSelect: () => { void saveSelected(); } },
+    { label: 'Delete selected…', danger: true, disabled: busy || !selectedItems.length, onSelect: () => setDialog({ name: 'delete-selected', items: selectedItems }) },
+    { label: 'Done selecting', separatorBefore: true, disabled: busy, onSelect: () => setSelection(null) },
+  ];
 
   const move = (item: CaptureItem, folderId: string | null) =>
     native.moveCapture(item.id, folderId).then(onChanged).catch(report);
 
-  const itemMenu = (item: CaptureItem): MenuItem[] => [
+  const itemMenu = (item: CaptureItem): MenuItem[] => selection !== null ? [
+    { label: selection.has(item.id) ? 'Deselect this item' : 'Select this item', disabled: busy, onSelect: () => toggleSelection(item) },
+    ...batchMenu(),
+  ] : [
+    { label: 'Select mode', onSelect: () => setSelection(new Set([item.id])) },
     { label: item.kind === 'url' ? linkOpenLabel(item) : item.kind === 'video' ? 'Play video' : 'Open', onSelect: () => p.onOpen(item) },
     ...(item.kind === 'video' ? [] : [{ label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) }]),
     { label: 'Show in Explorer', onSelect: () => native.reveal(item.id).catch(report) },
@@ -135,7 +179,9 @@ export function Shelf(p: Props) {
 
   return (
     <>
-      <div className="view" inert={dialog !== null} ref={panel}>
+      <div className="view" inert={dialog !== null || busy} ref={panel} onKeyDown={e => {
+        if (e.key === 'Escape' && selection !== null) { e.preventDefault(); if (!busy) setSelection(null); }
+      }}>
         <div className="sheet">
           <header className="header">
             <button className="icon-btn brand-home" onClick={() => p.onFilters(NO_FILTERS)} aria-label="Captrain — show everything" title="Captrain — show everything"><img src="/captrain.svg" width="28" height="28" alt="" /></button>
@@ -175,7 +221,17 @@ export function Shelf(p: Props) {
               onSelect={id => p.onFilters({ ...filters, folderId: id })} onCreate={() => setDialog({ name: 'new-folder' })} menuFor={folderMenu}
               onDropItem={(id, folderId) => { const item = items.find(i => i.id === id); if (item && item.folderId !== folderId) move(item, folderId); }} />
           )}
-          <main className="body" ref={body}>
+          {selection !== null && (
+            <div className="selection-bar" role="group" aria-label="Selected items">
+              <span role="status">{selectedItems.length} selected</span>
+              <button className="btn" disabled={busy} onClick={() => setSelection(new Set(items.map(item => item.id)))}>Select visible</button>
+              <button className="btn" disabled={busy || !selectedItems.length} aria-haspopup="menu" aria-expanded={selectionMenu.isOpen}
+                onClick={e => selectionMenu.openBelow(batchMenu(), e.currentTarget)}>Actions</button>
+              <button className="btn" disabled={busy} onClick={() => setSelection(null)}>Done</button>
+              {selectionMenu.menu}
+            </div>
+          )}
+          <main className="body" ref={body} aria-busy={busy}>
             {p.error ? <p className="empty">{p.error}</p>
               : !p.loaded ? null
               : items.length === 0 ? (
@@ -183,7 +239,8 @@ export function Shelf(p: Props) {
                   {filtered ? 'Nothing matches these filters.' : 'No captures yet.'}
                   {!filtered && settings && <> Press <kbd>{formatShortcut(settings.shortcuts.region)}</kbd> or use Capture below.</>}
                 </p>
-              ) : <CaptureList items={items} thumbs={thumbs} layout={layout} freshId={freshId} onOpen={p.onOpen} menuFor={itemMenu} />}
+              ) : <CaptureList items={items} thumbs={thumbs} layout={layout} freshId={freshId} selection={selection} disabled={busy}
+                onOpen={selection !== null ? toggleSelection : p.onOpen} menuFor={itemMenu} />}
             {items.length < p.total && <button className="btn more" onClick={p.onMore}>Show more ({p.total - items.length})</button>}
           </main>
           <p className="toast" role="status">{toast}</p>
@@ -218,6 +275,14 @@ export function Shelf(p: Props) {
         <ConfirmDialog title="Delete this capture?" confirm="Delete" busy={busy} onCancel={closeDialog}
           body="This item will be permanently removed from Captrain. Exported copies are kept."
           onConfirm={() => run(async () => { await native.delete(dialog.item.id); onChanged(); closeDialog(); })} />
+      )}
+      {dialog?.name === 'delete-selected' && (
+        <ConfirmDialog title={`Delete ${dialog.items.length} selected items?`} confirm="Delete selected" busy={busy} onCancel={() => { if (!busy) closeDialog(); }}
+          body="These items will be permanently removed from Captrain. Exported copies and linked folders are kept."
+          onConfirm={() => run(async () => {
+            finishBatch(await applyToSelection(dialog.items, native.delete));
+            setDialog(null);
+          })} />
       )}
     </>
   );

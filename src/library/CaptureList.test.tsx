@@ -9,6 +9,15 @@ const render = (overrides: Partial<CaptureItem> = {}) => renderToStaticMarkup(
 );
 
 describe('saved link rows', () => {
+  it('exposes checked selection in list and grid without dragging', () => {
+    for (const layout of ['list', 'grid'] as const) {
+      const html = renderToStaticMarkup(<CaptureList items={[item]} thumbs={{}} layout={layout} selection={new Set([item.id])} onOpen={() => {}} menuFor={() => []} />);
+      expect(html).toContain('role="checkbox"');
+      expect(html).toContain('aria-checked="true"');
+      expect(html).toContain('draggable="false"');
+      expect(html).toContain('class="selection-check"');
+    }
+  });
   it('shows the domain, full address and browser action without a duplicate badge', () => {
     const html = render();
     expect(html).toContain('>github.com</strong>');

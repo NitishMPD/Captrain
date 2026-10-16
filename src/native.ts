@@ -12,6 +12,7 @@ export interface ShelfState { mode: Mode; hovered: boolean; error: string | null
 export interface Settings { edge: 'left' | 'right'; display: string | null; edgePosition: number; shortcutsOnly: boolean; morphAnimation: boolean; shortcuts: Record<'region' | 'window' | 'screen' | 'url' | 'video' | 'toggle', string>; captureFolder: string | null; instantCapture: boolean; captureKind: CaptureKind; activeFolder: string | null; destinations: Destinations; theme: 'system' | 'light' | 'dark'; }
 export interface Display { id: string; name: string; }
 export interface LibraryPage { items: CaptureItem[]; total: number; }
+export interface BatchResult { completed: string[]; errors: string[]; }
 export interface OverlayData { kind: 'region' | 'window'; image: string | null; width: number; height: number; windows: { id: string; x: number; y: number; width: number; height: number }[]; }
 
 export interface RecordingOptions {
@@ -63,6 +64,7 @@ export const native = {
   image: (id: string, thumbnail = false) => invoke<string>('capture_image', { id, thumbnail }),
   copy: (id: string) => invoke<void>('copy_capture', { id }),
   save: (id: string) => invoke<boolean>('save_capture', { id }),
+  saveSelected: (ids: string[]) => invoke<BatchResult | null>('save_selected', { ids }),
   delete: (id: string) => invoke<void>('delete_capture', { id }),
   settings: () => invoke<Settings>('get_settings'),
   displays: () => invoke<Display[]>('list_displays'),

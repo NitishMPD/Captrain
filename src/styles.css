@@ -182,6 +182,14 @@ li:last-child .row { border-bottom-color: transparent; }
 .dest span { display: flex; flex-direction: column; min-width: 0; }
 .dest strong { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.selection-bar > span { flex: 1; min-width: 72px; font-size: 13px; }
+.selection-bar .btn { min-height: 34px; padding: 0 10px; font-size: 12px; }
+.row[aria-checked="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.selection-check { flex: 0 0 18px; width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid var(--muted); border-radius: 4px; color: var(--accent-text); background: var(--card); }
+.selection-check .icon { width: 14px; height: 14px; }
+.grid .row[role="checkbox"] { position: relative; }
+.grid .selection-check { position: absolute; z-index: 1; top: 12px; left: 12px; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-item); background: var(--card); font-weight: 500; transition: background var(--ease); }
 .btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
