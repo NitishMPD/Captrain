@@ -49,10 +49,12 @@ ul { list-style: none; }
 kbd { font: inherit; font-size: 12px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 .icon { width: 18px; height: 18px; flex: none; }
 
-/* Root: fills the native window. The collapsed window is 16x72, the open shelf 540x740. */
+/* The open window includes the 10px edge gutter so the morph can reach the actual bar. */
 .root { width: 100%; height: 100%; display: flex; align-items: center; }
 .root.right { justify-content: flex-end; }
 .root.left { justify-content: flex-start; }
+.root.right:not([data-mode="collapsed"]), .root.right[data-closing="true"] { padding-right: 10px; }
+.root.left:not([data-mode="collapsed"]), .root.left[data-closing="true"] { padding-left: 10px; }
 
 .bar { width: 16px; height: 72px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; }
 .root.right .bar { justify-content: flex-end; }
@@ -64,13 +66,14 @@ kbd { font: inherit; font-size: 12px; color: var(--muted); background: var(--sur
 .bar:focus-visible { outline: none; }
 .bar:focus-visible .bar-line { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.panel { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--dock); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; animation: morph-right 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-/* Grow from the collapsed bar: clip to the bar's 9x64 pill on the screen edge, then open to the full panel. */
-@keyframes morph-right { from { clip-path: inset(calc(50% - 32px) 0 calc(50% - 32px) calc(100% - 9px) round 4px); background: #34363d; } to { clip-path: inset(0 round var(--radius)); } }
-@keyframes morph-left { from { clip-path: inset(calc(50% - 32px) calc(100% - 9px) calc(50% - 32px) 0 round 4px); background: #34363d; } to { clip-path: inset(0 round var(--radius)); } }
-.root.left .panel { animation-name: morph-left; }
+.panel { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--dock); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; animation: morph-open 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* edge_y uses the same normalized travel for the 72px bar and the open panel. */
+.panel { --bar-center: calc((100% - 72px) * var(--edge-position, 0.5) + 36px); --bar-clip: inset(calc(var(--bar-center) - 28px) 0 calc(100% - var(--bar-center) - 28px) calc(100% - 6px) round 4px); --bar-shift: 10px; }
+.root.left .panel { --bar-clip: inset(calc(var(--bar-center) - 28px) calc(100% - 6px) calc(100% - var(--bar-center) - 28px) 0 round 4px); --bar-shift: -10px; }
+@keyframes morph-open { from { clip-path: var(--bar-clip); transform: translateX(var(--bar-shift)); background: #34363d; } to { clip-path: inset(0 round var(--radius)); transform: translateX(0); } }
+@keyframes morph-close { from { clip-path: inset(0 round var(--radius)); transform: translateX(0); } to { clip-path: var(--bar-clip); transform: translateX(var(--bar-shift)); background: #34363d; } }
 .root[data-morph="false"] .panel { animation: none; }
-.panel.closing { animation-direction: reverse; animation-fill-mode: forwards; pointer-events: none; }
+.panel.closing { animation-name: morph-close; animation-fill-mode: forwards; pointer-events: none; }
 
 .view { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
 /* The warm-white card that holds header, toolbar, folders and the list. */

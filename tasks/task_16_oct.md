@@ -14,3 +14,10 @@
 - Added one native batch-save command: pick a destination once, validate owned IDs, skip exported items, deduplicate IDs and reuse exclusive automatic exports. Existing files and linked targets remain protected. Updated design.md.
 - Verification: TypeScript typecheck and all 37 frontend tests passed; native library tests passed (31 passed, 2 live tests ignored). Regression tests cover selection semantics, partial failures, owned-ID preflight, skipped exports, duplicate IDs and filename collisions. Browser checks using the real Shelf with mocked native commands exercised selection, skipping saved items, move, confirmed delete/cancel, failure retention, Escape and light/grid versus dark/list layout without horizontal overflow at 540px. Preview pointer actions were unreliable, so action assertions used DOM events.
 - Not checked: real native folder picker, browser title accessibility, installer or OS interactions. No app/installer build, branch, push or deployment.
+
+## Shelf closing position
+
+- Fixed the morph's hard-coded center target and inset endpoint: use the saved normalized bar height and extend native open bounds through the 10px edge gutter, preserving the visible panel size and placement. Opening and closing match the resting 6 × 56 bar at either screen edge.
+- Give closing its own animation and retain its final frame until native size/position changes complete. Repeated collapsed hover/state events no longer interrupt closing or render a centered bar in the expanded window. Updated design.md.
+- Verification: TypeScript typecheck, all 37 frontend tests and native library tests passed (31 passed, 2 live tests ignored). Browser assertions using the real stylesheet passed at five heights on each edge, checking the endpoint position/size, a separate close animation and disabled morph setting. `git diff --check` passed.
+- Not checked: live Windows animation handoff, multiple-monitor DPI transitions or native reduced-motion timing. No app/installer build, branch, push or deployment.

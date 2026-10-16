@@ -382,21 +382,16 @@ fn apply_inner(app: &AppHandle, activate: bool, animate: bool) {
         let (width, height) = if collapsed {
             (16.0, 72.0)
         } else if settings.shortcuts_only && view.mode == Mode::Temporary {
-            (340.0, 120.0)
+            (350.0, 120.0)
         } else {
-            (540.0, 740.0)
+            (550.0, 740.0)
         };
         let width = ((width * d.scale) as i32).min(d.work.right - d.work.left);
         let height = ((height * d.scale) as i32).min(d.work.bottom - d.work.top);
-        let inset = if collapsed {
-            0
-        } else {
-            (10.0 * d.scale) as i32
-        };
         let x = if settings.edge == "left" {
-            d.work.left + inset
+            d.work.left
         } else {
-            d.work.right - width - inset
+            d.work.right - width
         }
         .clamp(d.work.left, d.work.right - width);
         let y = edge_y(d.work.top, d.work.bottom, height, settings.edge_position);
@@ -416,6 +411,9 @@ fn apply_inner(app: &AppHandle, activate: bool, animate: bool) {
         }
         let _ = window.set_size(PhysicalSize::new(width as u32, height as u32));
         let _ = window.set_position(PhysicalPosition::new(x, y));
+        if collapsed {
+            let _ = app2.emit_to("shelf", "shelf-collapsed", ());
+        }
         if let Ok(handle) = window.hwnd() {
             unsafe {
                 let hwnd = HWND(handle.0);

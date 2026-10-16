@@ -76,6 +76,7 @@ export const native = {
   select: (selection: { x?: number; y?: number; width?: number; height?: number; windowId?: string }) => invoke<void>('finish_selection', { selection }),
   cancel: () => invoke<void>('cancel_capture'),
   onState: (fn: (state: ShelfState) => void) => listen<ShelfState>('shelf-state', e => fn(e.payload)),
+  onCollapsed: (fn: () => void) => listen('shelf-collapsed', fn),
   onCapture: (fn: (item: CaptureItem) => void) => listen<CaptureItem>('capture-created', e => fn(e.payload)),
   onLibraryChanged: (fn: () => void) => listen('library-changed', fn),
 };

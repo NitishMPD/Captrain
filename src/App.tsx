@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useCaptures } from './library/useCaptures';
 import { native, type CaptureItem, type Settings as SettingsData, type ShelfState } from './native';
 import { Settings } from './settings/Settings';
@@ -55,7 +55,7 @@ export function App() {
     let disposed = false;
     const unlisten: (() => void)[] = [];
     (async () => {
-      const [offState, offCapture, offLibrary, offRecording, offSettings] = await Promise.all([
+      const [offState, offCapture, offLibrary, offRecording, offSettings, offCollapsed] = await Promise.all([
         native.onOpenRecording(() => setView('recording')),
         native.onState(s => {
           const previous = mode.current;
@@ -63,7 +63,7 @@ export function App() {
           reveal.current = s.reveal;
           setShelf(s);
           // Native keeps the window open for the close animation (shelf_window::apply).
-          setClosing(morph.current && s.mode === 'collapsed' && (previous === 'manual' || previous === 'temporary'));
+          if (s.mode !== previous) setClosing(morph.current && s.mode === 'collapsed' && (previous === 'manual' || previous === 'temporary'));
           if (s.mode === 'temporary' && previous !== 'temporary' && !awaitingItem.current) armTimer();
         }),
         native.onCapture(item => {
@@ -80,9 +80,10 @@ export function App() {
           native.settings().then(s => { if (!disposed) setSettings(s); }).catch(() => {});
         }),
         native.onSettingsChanged(setSettings),
+        native.onCollapsed(() => { if (mode.current === 'collapsed') setClosing(false); }),
       ]);
-      if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); offSettings(); return; }
-      unlisten.push(offState, offCapture, offLibrary, offRecording, offSettings);
+      if (disposed) { offState(); offCapture(); offLibrary(); offRecording(); offSettings(); offCollapsed(); return; }
+      unlisten.push(offState, offCapture, offLibrary, offRecording, offSettings, offCollapsed);
       const [state, loaded] = await Promise.all([native.state(), native.settings()]);
       if (disposed) return;
       mode.current = state.mode;
@@ -136,6 +137,8 @@ export function App() {
     className: `root ${edge}`,
     'data-morph': morph.current,
     'data-mode': shelf.mode,
+    'data-closing': closing,
+    style: { '--edge-position': settings?.edgePosition ?? 0.5 } as CSSProperties,
     onPointerEnter: () => quiet(native.shelf('enter')),
     onPointerLeave: () => quiet(native.shelf('leave')),
   };
@@ -186,7 +189,7 @@ export function App() {
 
   return (
     <div {...root} onPointerDownCapture={() => { if (shelf.mode === 'temporary') quiet(native.shelf('interact')); }}>
-      <section className={closing ? 'panel closing' : 'panel'} aria-label="Captrain shelf" onAnimationEnd={e => { if (closing && e.target === e.currentTarget) setClosing(false); }}>
+      <section className={closing ? 'panel closing' : 'panel'} aria-label="Captrain shelf">
         {recordingActive && <RecordingStatus state={recording} onError={setNotice} />}
         {view === 'shelf' && ['available', 'downloaded'].includes(update.status) && (
           <div className="banner" role="status">
