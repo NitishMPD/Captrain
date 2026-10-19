@@ -4,6 +4,7 @@ import { native, type Display, type Folder, type Settings as SettingsData } from
 import { errorMessage, kindLabel, quiet, useHold } from '../util';
 import { findDuplicate, formatShortcut, recordShortcut } from './shortcut';
 import { AppUpdates } from '../updates/AppUpdates';
+import { CloudBackup } from './CloudBackup';
 
 type Action = keyof SettingsData['shortcuts'];
 const DESTINATIONS: { id: keyof SettingsData['destinations']; label: string }[] = [
@@ -237,6 +238,8 @@ export function Settings({ settings, onSaved, onBack }: Props) {
           {errors.captureFolder && <p className="field-error" role="alert">{errors.captureFolder}</p>}
           {storage && <><label className="note" htmlFor="library-path">Protected library originals</label><input id="library-path" className="search" value={storage} readOnly title={storage} /></>}
         </section>
+
+        <CloudBackup />
 
         <section aria-labelledby="s-keys">
           <h2 id="s-keys">Shortcuts</h2>

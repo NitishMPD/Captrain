@@ -9,3 +9,6 @@ recorder/obj/
 recorder/bin/
 src-tauri/recorder/*
 !src-tauri/recorder/README.txt
+cloud/oauth-client.json
+client_secret_*.json
+cloud-auth.bin

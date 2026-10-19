@@ -13,6 +13,8 @@ export interface Settings { edge: 'left' | 'right'; display: string | null; edge
 export interface Display { id: string; name: string; }
 export interface LibraryPage { items: CaptureItem[]; total: number; }
 export interface BatchResult { completed: string[]; errors: string[]; }
+export interface CloudOptions { images: boolean; links: boolean; videos: boolean; includeExisting: boolean; paused: boolean; }
+export interface CloudStatus { configured: boolean; connected: boolean; account: string | null; options: CloudOptions; lastBackup: string | null; busy: boolean; phase: string; error: string | null; }
 export interface OverlayData { kind: 'region' | 'window'; image: string | null; width: number; height: number; windows: { id: string; x: number; y: number; width: number; height: number }[]; }
 
 export interface RecordingOptions {
@@ -28,6 +30,10 @@ export interface RecordingDevices { microphones: RecordingDevice[]; cameras: Rec
 export interface RecordingTargets { displays: RecordingDevice[]; windows: RecordingDevice[]; }
 
 export const native = {
+  cloudStatus: () => invoke<CloudStatus>('cloud_status'),
+  cloudConfigure: () => invoke<CloudStatus>('cloud_configure'),
+  cloudOptions: (options: CloudOptions) => invoke<CloudStatus>('cloud_options', { options }),
+  cloudAction: (action: 'connect' | 'backup' | 'restore' | 'disconnect' | 'cancel') => invoke<CloudStatus>('cloud_action', { action }),
   recordingTargets: () => invoke<RecordingTargets>('recording_targets'),
   recordingDevices: () => invoke<RecordingDevices>('recording_devices'),
   recordingState: () => invoke<RecordingState>('recording_state'),

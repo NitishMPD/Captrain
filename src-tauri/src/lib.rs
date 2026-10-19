@@ -1,4 +1,5 @@
 mod capture;
+mod cloud;
 mod desktop;
 mod foreground;
 mod library;
@@ -427,6 +428,10 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            cloud::cloud_status,
+            cloud::cloud_configure,
+            cloud::cloud_options,
+            cloud::cloud_action,
             updates::check_update,
             updates::download_update,
             updates::install_update,
@@ -519,6 +524,8 @@ pub fn run() {
                 viewer: Mutex::new(None),
             });
             app.manage(state.clone());
+            app.manage(Arc::new(cloud::Cloud::new(root)));
+            cloud::start_worker(app.handle().clone());
             foreground::start().map_err(std::io::Error::other)?;
             shelf_window::watch_displays(app.handle()).map_err(std::io::Error::other)?;
             shelf_window::timer(app.handle().clone(), state);

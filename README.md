@@ -49,7 +49,7 @@ Organizational folders and memberships are persisted in `index.json`. Existing f
 
 Rust serializes mutations, writes and synchronizes images before replacing the index atomically, and emits capture-created only after commit. File commands resolve IDs inside the owned library; frontend content has no generic filesystem or shell access. Save as exports to a destination chosen in the native dialog, with its overwrite prompt, and leaves the library original intact. Exporting into the private library is rejected.
 
-Malformed indexes/settings are preserved and reported, and their writes are blocked. To recover, exit Captrain, preserve the damaged file elsewhere, then restore a valid copy of that file. Removing a damaged index starts an empty history and leaves image files on disk; it does not import orphaned images. Missing originals are hidden from results while their metadata remains. There is no automatic purge, upload, telemetry or remote UI content.
+Malformed indexes/settings are preserved and reported, and their writes are blocked. To recover, exit Captrain, preserve the damaged file elsewhere, then restore a valid copy of that file. Removing a damaged index starts an empty history and leaves image files on disk; it does not import orphaned images. Missing originals are hidden from results while their metadata remains. There is no automatic purge, telemetry or remote UI content. Cloud upload is opt-in through Settings ? Cloud backup.
 
 ## Focused checks
 
@@ -92,7 +92,7 @@ WGC access failures, explicit window display-affinity protection, unavailable ta
 
 Output is 8-bit SDR PNG. HDR tone/color accuracy is unverified and may clip highlights; validate on HDR hardware before relying on color fidelity. The default Windows capture border is retained. Development timing/memory does not establish release performance; the plan's latency, CPU and memory figures are provisional goals.
 
-Browser link saving, appearance, Windows startup, organizational folders and initial video recording are implemented. Tags, annotation, OCR, sync and alternate screenshot formats remain deferred.
+Browser link saving, appearance, Windows startup, organizational folders and initial video recording are implemented. Tags, annotation, OCR, full two-way sync and alternate screenshot formats remain deferred. Google Drive backup and additive restore are available through Settings ? Cloud backup; see [setup instructions](docs/google-drive-setup.md).
 
 ## Recording
 
@@ -151,3 +151,9 @@ Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY
 The Windows x64 installer is produced at `src-tauri/target/release/bundle/nsis/Captrain_0.1.0_x64-setup.exe` for the checked-in version. No installer exists until that command completes; installer generation was not run here under the standing no-release-build instruction.
 
 No release build, branch, push or deployment was performed. The source icon and tray mark are simple procedural geometry authored for this app; there are no generated photographic assets or remote fonts.
+
+## Google Drive backup
+
+Settings ? Cloud backup connects your own Google account using a Desktop OAuth JSON imported locally. Enable the Google Drive API and create the OAuth client first; follow [Google Drive setup](docs/google-drive-setup.md). The example configuration is in [cloud/oauth-client.example.json](cloud/oauth-client.example.json); save the real downloaded file as gitignored `cloud/oauth-client.json` and import it through Settings. No Captrain backend or storage subscription is required; Google's account storage and API limits apply.
+
+Choose screenshots, web links and optionally videos. Existing history is opt-in. While Captrain runs, selected changes back up within the next minute; pause and manual backup are available. Restore missing items adds cloud items without overwriting local entries. Local deletion and disconnect keep cloud copies. This release provides backup/restore rather than automatic two-way sync. Local paths, Windows folder links and device settings are excluded. Credentials are encrypted for the current Windows user. No live Google account was connected during source verification.

@@ -122,6 +122,58 @@ pub struct Folder {
     #[serde(skip_deserializing, default)]
     pub count: usize,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BackupItem {
+    pub item: Item,
+    pub folder: Option<Folder>,
+}
+
+impl BackupItem {
+    pub fn validate(&self) -> Result<()> {
+        let i = &self.item;
+        if Uuid::parse_str(&i.id)
+            .map(|id| id.to_string())
+            .ok()
+            .as_deref()
+            != Some(&i.id)
+            || chrono::DateTime::parse_from_rfc3339(&i.created_at).is_err()
+            || i.filename.is_empty()
+            || i.filename.encode_utf16().count() > 255
+            || i.filename
+                .chars()
+                .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+            || !i.filename.ends_with(&format!(".{}", i.kind.extension()))
+            || i.exported_path.is_some()
+            || i.title
+                .as_deref()
+                .is_some_and(|t| valid_link_title(t).is_err())
+        {
+            return Err("Invalid cloud item metadata.".into());
+        }
+        if i.kind == Kind::Url {
+            crate::links::validate_url(i.url.as_deref().ok_or("Missing cloud URL.")?)?;
+        } else if i.url.is_some() || i.width == 0 || i.height == 0 {
+            return Err("Invalid cloud media metadata.".into());
+        }
+        if let Some(folder) = &self.folder {
+            if Uuid::parse_str(&folder.id)
+                .map(|id| id.to_string())
+                .ok()
+                .as_deref()
+                != Some(&folder.id)
+                || folder.path.is_some()
+                || i.folder_id.as_deref() != Some(&folder.id)
+            {
+                return Err("Invalid cloud folder metadata.".into());
+            }
+            valid_folder_name(&folder.name)?;
+        } else if i.folder_id.is_some() {
+            return Err("Missing cloud folder metadata.".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Serialize, Deserialize, Default)]
 struct Index {
     items: Vec<Item>,
@@ -214,6 +266,101 @@ fn valid_folder_name(name: &str) -> Result<String> {
 }
 
 impl Library {
+    pub fn backup_items(&self) -> Result<Vec<BackupItem>> {
+        if !self.writable {
+            return Err("Recover the local index before using cloud backup.".into());
+        }
+        Ok(self
+            .items
+            .iter()
+            .filter(|i| {
+                self.path(i, false).is_file()
+                    && (i.kind != Kind::Url
+                        || i.url
+                            .as_deref()
+                            .is_some_and(|u| crate::links::validate_url(u).is_ok()))
+            })
+            .map(|i| {
+                let mut item = i.clone();
+                item.exported_path = None;
+                let folder = self
+                    .folders
+                    .iter()
+                    .find(|f| Some(&f.id) == item.folder_id.as_ref() && f.path.is_none())
+                    .cloned();
+                if folder.is_none() {
+                    item.folder_id = None;
+                }
+                BackupItem { item, folder }
+            })
+            .collect())
+    }
+
+    /// Consumes verified files staged on the library volume, outside the library lock.
+    pub fn restore_backup(
+        &mut self,
+        backup: &BackupItem,
+        source: &Path,
+        thumbnail: Option<&Path>,
+    ) -> Result<bool> {
+        backup.validate()?;
+        if !self.writable {
+            return Err("Recover the local index before restoring.".into());
+        }
+        let item = &backup.item;
+        if self.items.iter().any(|i| i.id == item.id) {
+            return Ok(false);
+        }
+        let target = self.path(item, false);
+        let thumb = self.path(item, true);
+        if target.exists() || (thumbnail.is_some() && thumb.exists()) {
+            return Err("An unindexed local file already uses this cloud item's ID. Preserve it before restoring.".into());
+        }
+        let previous_folders = self.folders.len();
+        if let Some(folder) = &backup.folder {
+            if !self.folders.iter().any(|f| f.id == folder.id) {
+                self.folders.push(folder.clone());
+            }
+        }
+        let result = (|| {
+            // Same-volume staging avoids copying large videos while holding the library lock.
+            let install = |from: &Path, to: &Path| -> Result<()> {
+                let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+                let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+                // Without REPLACE_EXISTING, an external file created concurrently is preserved.
+                unsafe {
+                    MoveFileExW(
+                        PCWSTR(from.as_ptr()),
+                        PCWSTR(to.as_ptr()),
+                        MOVEFILE_WRITE_THROUGH,
+                    )
+                    .map_err(err)
+                }
+            };
+            install(source, &target)?;
+            if let Some(source) = thumbnail {
+                if let Err(error) = install(source, &thumb) {
+                    let _ = fs::remove_file(&target);
+                    return Err(error);
+                }
+            }
+            self.items.push(item.clone());
+            if let Err(error) = self.persist() {
+                self.items.pop();
+                let _ = fs::remove_file(&target);
+                if thumbnail.is_some() {
+                    let _ = fs::remove_file(&thumb);
+                }
+                return Err(error);
+            }
+            Ok(true)
+        })();
+        if result.is_err() {
+            self.folders.truncate(previous_folders);
+        }
+        result
+    }
+
     fn persist(&self) -> Result<()> {
         if !self.writable {
             return Err("Capture index needs recovery; existing data was left untouched.".into());
@@ -931,6 +1078,80 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cloud_backup_excludes_pc_paths_and_restore_is_additive_and_transactional() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let other_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut original = Library::open(root.clone()).unwrap();
+        let folder = original.create_folder("Research").unwrap();
+        let item = original
+            .commit_url("https://example.com/", Some("Example"), Some(&folder.id))
+            .unwrap();
+        original.commit_url("file:///C:/Work/", None, None).unwrap();
+        original.items[0].exported_path = Some(PathBuf::from("C:/private/export.url"));
+        let backups = original.backup_items().unwrap();
+        assert_eq!(backups.len(), 1);
+        let backup = &backups[0];
+        assert!(backup.item.exported_path.is_none());
+        assert!(backup.folder.as_ref().unwrap().path.is_none());
+        let source = root.join("staged.url");
+        fs::copy(original.path(&item, false), &source).unwrap();
+        let mut restored = Library::open(other_root.clone()).unwrap();
+        assert!(restored.restore_backup(backup, &source, None).unwrap());
+        restored.rename_link(&item.id, "Local edit").unwrap();
+        assert!(!restored.restore_backup(backup, &source, None).unwrap());
+        assert_eq!(
+            restored.get(&item.id).unwrap().title.as_deref(),
+            Some("Local edit")
+        );
+        assert_eq!(
+            Library::open(other_root.clone()).unwrap().folders()[0].name,
+            "Research"
+        );
+        let mut malformed = backup.clone();
+        malformed.item.id = "../../outside".into();
+        assert!(restored.restore_backup(&malformed, &source, None).is_err());
+        malformed = backup.clone();
+        malformed.item.url = Some("file:///C:/private/".into());
+        assert!(malformed.validate().is_err());
+        malformed = backup.clone();
+        malformed.folder.as_mut().unwrap().path = Some(PathBuf::from("C:/private"));
+        assert!(malformed.validate().is_err());
+        let mut next = backup.clone();
+        next.item.id = Uuid::new_v4().to_string();
+        let orphan = restored.path(&next.item, false);
+        fs::write(&orphan, b"keep orphan").unwrap();
+        assert!(restored.restore_backup(&next, &source, None).is_err());
+        assert_eq!(fs::read(&orphan).unwrap(), b"keep orphan");
+        fs::remove_file(&orphan).unwrap();
+        fs::copy(original.path(&item, false), &source).unwrap();
+        // Force index replacement to fail after originals have been installed.
+        fs::remove_file(other_root.join("index.json")).unwrap();
+        fs::create_dir(other_root.join("index.json")).unwrap();
+        assert!(restored.restore_backup(&next, &source, None).is_err());
+        assert!(restored.get(&next.item.id).is_none());
+        assert!(!restored.path(&next.item, false).exists());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(other_root).unwrap();
+    }
+
+    #[test]
+    fn cloud_backup_removes_permanent_folder_membership_and_rejects_damaged_index() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut library = Library::open(root.clone()).unwrap();
+        let folder = library.create_folder("PC folder").unwrap();
+        library.folders[0].path = Some(PathBuf::from("C:/private"));
+        library
+            .commit_url("https://example.com/", None, Some(&folder.id))
+            .unwrap();
+        let backups = library.backup_items().unwrap();
+        assert!(backups[0].folder.is_none());
+        assert!(backups[0].item.folder_id.is_none());
+        fs::write(root.join("index.json"), b"broken").unwrap();
+        assert!(Library::open(root.clone()).unwrap().backup_items().is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn videos_keep_owned_files_and_stream_exports_without_entering_image_navigation() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());

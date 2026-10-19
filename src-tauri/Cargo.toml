@@ -21,10 +21,13 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "query", "rustls-no-provider"] }
+sha2 = "0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 rfd = "0.17"
 windows-capture = "2.0.1"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_Registry", "Win32_Storage_FileSystem"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_Registry", "Win32_Storage_FileSystem"] }
 tauri-plugin-updater = "2"
 
 [profile.release]

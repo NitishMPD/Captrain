@@ -1,0 +1,10 @@
+{
+  "installed": {
+    "client_id": "YOUR_DESKTOP_CLIENT_ID.apps.googleusercontent.com",
+    "project_id": "YOUR_GOOGLE_CLOUD_PROJECT",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_secret": "USE_THE_DOWNLOADED_DESKTOP_CLIENT_CONFIGURATION",
+    "redirect_uris": ["http://localhost"]
+  }
+}
