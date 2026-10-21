@@ -183,19 +183,7 @@ pub fn reveal_capture(
     id: String,
 ) -> Result<()> {
     content_only(&window)?;
-    let path = {
-        let library = state.library.lock().unwrap();
-        let (stored, _) = library.export_source(&id)?;
-        // Prefer the copy the user saved on their PC; fall back to Captrain's own file.
-        library
-            .get(&id)
-            .and_then(|i| i.exported_path.clone())
-            .filter(|p| p.is_file())
-            .unwrap_or(stored)
-    };
-    if !path.is_file() {
-        return Err("This file is no longer on disk.".into());
-    }
+    let path = state.library.lock().unwrap().capture_path(&id)?;
     use std::os::windows::process::CommandExt;
     std::process::Command::new("explorer.exe")
         .raw_arg(format!("/select,\"{}\"", path.display()))
@@ -203,6 +191,31 @@ pub fn reveal_capture(
         .map_err(err)?;
     Ok(())
 }
+#[tauri::command]
+pub fn copy_path(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    id: String,
+    folder: bool,
+) -> Result<()> {
+    content_only(&window)?;
+    let library = state.library.lock().unwrap();
+    let path = if folder {
+        library
+            .folders()
+            .into_iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.path)
+            .ok_or("This folder is not on your PC.")?
+    } else {
+        library.capture_path(&id)?
+    };
+    arboard::Clipboard::new()
+        .map_err(err)?
+        .set_text(path.to_string_lossy().into_owned())
+        .map_err(err)
+}
+
 #[tauri::command]
 pub fn open_folder(
     window: WebviewWindow,

@@ -52,3 +52,11 @@ Source checks passed: TypeScript typecheck; 9 focused cloud/backup tests includi
 ## Public website
 
 Captrain's public homepage is https://nitishmpd.github.io/captrain/, with privacy at /captrain/privacy/ and terms at /captrain/terms/. Static site source lives separately at D:\Nitish\Random\Code\Captrain-pages in NitishMPD/NitishMPD.github.io. The requested Sonnet 5.5 medium subagent published site commit 5db2815; public URLs returned HTTP 200. The site marks cloud backup as development functionality absent from the current installer. The website has no scripts or analytics. Google domain ownership and OAuth verification are separate from GitHub Pages publication. App source changes remain uncommitted and unpushed.
+
+## Recording preferences and target countdown
+
+Recording setup restores validated local preferences from recording-settings.json in the private library root. Changes are saved atomically and serialized; source type, display, quality, frame rate, resolution, cursor, countdown, enabled audio/camera devices and camera placement persist across setup sessions and app restarts. Native window handles are never persisted. Disconnected displays fall back to the shelf display or first available display. Unavailable remembered microphone/camera devices require choosing an available device or disabling that source; enumeration does not open capture devices.
+
+Rust owns the three-second countdown. A capture-protected transparent window identifies and outlines the target display, including when the shelf is on another monitor. Window capture uses the display nearest the selected native window; Region uses its selected display. The countdown waits for its first rendered frame, supports Cancel/Escape, and is destroyed before compositor synchronization and recorder startup. Cancellation, failure and completion clean up the countdown window. Multi-monitor/DPI placement and actual capture exclusion require native acceptance checks.
+
+Copy path resolves capture IDs in Rust and shares Show in Explorer's path selection: prefer an existing exported copy, otherwise the private original, rejecting missing files. This applies to screenshots, MP4s and saved .url shortcuts. Permanent PC folders copy their directory path by owned folder ID; organizational folders have no filesystem path.

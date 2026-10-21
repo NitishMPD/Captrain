@@ -194,6 +194,7 @@ export function Viewer() {
         <div className="v-stage" ref={stageEl} tabIndex={0} aria-label="Image canvas: drag to pan, scroll to zoom"
           {...contextMenu.bind(() => [
             { label: 'Copy', onSelect: () => { void copy(); } },
+            { label: 'Copy path', onSelect: () => { void run(async () => { await native.copyPath(item.id); setStatus('Path copied'); }); } },
             { label: 'Save as…', onSelect: () => { void save(); } },
             { label: 'Fit to window', onSelect: () => setView(null) },
             { label: 'Actual size', onSelect: actual },

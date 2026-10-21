@@ -12,7 +12,10 @@ use std::{
     sync::{atomic::Ordering, mpsc, Arc},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 use windows::{
     core::{w, PCWSTR},
     Win32::{
@@ -40,7 +43,9 @@ pub struct Options {
 }
 impl Options {
     fn validate(&self) -> Result<()> {
-        if !matches!(self.kind, Kind::Screen | Kind::Window | Kind::Region)
+        if self.display.len() > 4096
+            || self.window.as_ref().is_some_and(|w| w.len() > 64)
+            || !matches!(self.kind, Kind::Screen | Kind::Window | Kind::Region)
             || ![30, 60].contains(&self.fps)
             || ![0, 720, 1080].contains(&self.resolution)
             || !["standard", "high", "maximum"].contains(&self.quality.as_str())
@@ -54,6 +59,100 @@ impl Options {
         }
         Ok(())
     }
+}
+
+fn preferences(path: &std::path::Path, options: Option<Options>) -> Result<Option<Options>> {
+    if let Some(mut options) = options {
+        options.validate()?;
+        // Native window handles are transient and may belong to another app after restart.
+        options.window = None;
+        crate::library::atomic_write(path, &serde_json::to_vec(&options).map_err(err)?)?;
+        return Ok(Some(options));
+    }
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let options: Options = serde_json::from_slice(&bytes).map_err(err)?;
+            options.validate()?;
+            Ok(Some(options))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(err(e)),
+    }
+}
+
+#[tauri::command]
+pub fn recording_preferences(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    options: Option<Options>,
+) -> Result<Option<Options>> {
+    crate::shelf_only(&window)?;
+    let library = state.library.lock().unwrap();
+    preferences(&library.root.join("recording-settings.json"), options)
+}
+
+#[tauri::command]
+pub fn countdown_ready(window: WebviewWindow, state: tauri::State<Arc<AppState>>) -> Result<()> {
+    if window.label() != "recording-countdown" {
+        return Err("No recording countdown is active.".into());
+    }
+    state
+        .video
+        .lock()
+        .unwrap()
+        .control
+        .as_ref()
+        .ok_or("No recording is active.")?
+        .try_send("ready".into())
+        .map_err(err)
+}
+
+fn countdown_window(
+    app: &AppHandle,
+    bounds: windows::Win32::Foundation::RECT,
+    label: &str,
+) -> Result<()> {
+    let app2 = app.clone();
+    let mut url = tauri::Url::parse("https://captrain.invalid/index.html").map_err(err)?;
+    url.query_pairs_mut()
+        .append_pair("countdown", "1")
+        .append_pair("target", label);
+    let route = format!("index.html?{}", url.query().unwrap());
+    let (tx, rx) = mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let result: Result<()> = (|| {
+            let window = WebviewWindowBuilder::new(
+                &app2,
+                "recording-countdown",
+                WebviewUrl::App(route.into()),
+            )
+            .title("Captrain recording countdown")
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .visible(false)
+            .build()
+            .map_err(err)?;
+            window.set_content_protected(true).map_err(err)?;
+            window
+                .set_position(PhysicalPosition::new(bounds.left, bounds.top))
+                .map_err(err)?;
+            window
+                .set_size(PhysicalSize::new(
+                    (bounds.right - bounds.left) as u32,
+                    (bounds.bottom - bounds.top) as u32,
+                ))
+                .map_err(err)?;
+            window.show().map_err(err)?;
+            window.set_focus().map_err(err)?;
+            Ok(())
+        })();
+        let _ = tx.send(result);
+    })
+    .map_err(err)?;
+    rx.recv_timeout(Duration::from_secs(10)).map_err(err)?
 }
 
 fn dimensions(w: u32, h: u32, limit: u32) -> Result<(u32, u32)> {
@@ -132,6 +231,7 @@ pub fn open_setup(app: &AppHandle) -> Result<()> {
 fn publish(app: &AppHandle, state: &AppState, view: View) {
     state.video.lock().unwrap().view = view.clone();
     let _ = app.emit_to("shelf", "recording-state", &view);
+    let _ = app.emit_to("recording-countdown", "recording-state", &view);
 }
 fn helper(app: &AppHandle) -> Result<Command> {
     let path = if cfg!(debug_assertions) {
@@ -229,7 +329,9 @@ pub async fn recording_devices(window: WebviewWindow, app: AppHandle) -> Result<
 }
 #[tauri::command]
 pub fn recording_state(window: WebviewWindow, state: tauri::State<Arc<AppState>>) -> Result<View> {
-    crate::shelf_only(&window)?;
+    if window.label() != "recording-countdown" {
+        crate::shelf_only(&window)?;
+    }
     Ok(state.video.lock().unwrap().view.clone())
 }
 #[tauri::command]
@@ -238,7 +340,13 @@ pub fn recording_control(
     state: tauri::State<Arc<AppState>>,
     action: String,
 ) -> Result<()> {
-    crate::shelf_only(&window)?;
+    if window.label() == "recording-countdown" {
+        if action != "stop" {
+            return Err("Only cancel is available during countdown.".into());
+        }
+    } else {
+        crate::shelf_only(&window)?;
+    }
     if !["stop", "pause", "resume"].contains(&action.as_str()) {
         return Err("Unknown recording action.".into());
     }
@@ -332,6 +440,64 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
             }
             shelf_window::apply(&app, false);
             if options.countdown {
+                let displays = shelf_window::displays()?;
+                let target_monitor = if let Some(id) = target {
+                    let rect = capture::eligible(HWND(id as *mut _))?;
+                    Some(unsafe {
+                        windows::Win32::Graphics::Gdi::MonitorFromRect(
+                            &rect,
+                            windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST,
+                        )
+                    })
+                } else {
+                    None
+                };
+                let (index, countdown_display) = displays
+                    .iter()
+                    .enumerate()
+                    .find(|(_, d)| {
+                        target_monitor.map_or(d.id == display.id, |monitor| {
+                            d.monitor.as_raw_hmonitor() == monitor.0
+                        })
+                    })
+                    .ok_or("The recording display is no longer available.")?;
+                // Keep Cancel reachable even for a tiny selected region or window.
+                let bounds = countdown_display.bounds;
+                let label = if let Some(id) = target {
+                    let window = windows_capture::window::Window::from_raw_hwnd(id as *mut _);
+                    format!(
+                        "Display {} - Window: {}",
+                        index + 1,
+                        window.title().map_err(err)?
+                    )
+                } else {
+                    format!(
+                        "Display {}{} - {w} x {h}",
+                        index + 1,
+                        if options.kind == Kind::Region {
+                            " - Selected region"
+                        } else {
+                            ""
+                        }
+                    )
+                };
+                publish(
+                    &app,
+                    &state,
+                    View {
+                        status: "countdown:3".into(),
+                        options: Some(options.clone()),
+                        ..Default::default()
+                    },
+                );
+                countdown_window(&app, bounds, &label)?;
+                match rx.recv_timeout(Duration::from_secs(10)) {
+                    Ok(action) if action == "ready" => {}
+                    Ok(_) => return Ok(None),
+                    Err(_) => {
+                        return Err("The recording countdown could not open. Try again.".into())
+                    }
+                }
                 for remaining in (1..=3).rev() {
                     publish(
                         &app,
@@ -349,6 +515,11 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
             }
             if rx.try_recv().is_ok() {
                 return Ok(None);
+            }
+            if let Some(window) = app.get_webview_window("recording-countdown") {
+                window.destroy().map_err(err)?;
+                capture::hide_and_flush(&app)?;
+                shelf_window::apply(&app, false);
             }
             let settings = state.settings.lock().unwrap().value.clone();
             let id = uuid::Uuid::new_v4().to_string();
@@ -371,8 +542,10 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
                 .folder_for(Kind::Video)
                 .filter(|f| library.validate_folder(Some(f)).is_ok());
             let mut item = library.commit_video(&id, ow, oh, folder)?;
-            let export = library
-                .export_dir(item.folder_id.as_deref(), settings.capture_folder.as_deref());
+            let export = library.export_dir(
+                item.folder_id.as_deref(),
+                settings.capture_folder.as_deref(),
+            );
             if let Some(directory) = export {
                 match library.auto_export(&item.id, &directory) {
                     Ok(exported) => item = exported,
@@ -387,6 +560,9 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
         })();
         if let Some(window) = app.get_webview_window("shelf") {
             let _ = window.set_content_protected(false);
+        }
+        if let Some(window) = app.get_webview_window("recording-countdown") {
+            let _ = window.destroy();
         }
         state.pending.lock().unwrap().take();
         if let Some(w) = app.get_webview_window("overlay") {
@@ -548,6 +724,30 @@ use std::os::windows::ffi::OsStrExt;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preferences_persist_choices_without_stale_window_handles() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("recording-settings.json");
+        assert!(preferences(&path, None).unwrap().is_none());
+        let options: Options = serde_json::from_value(serde_json::json!({ "kind":"window", "display":"display-2", "window":"123",
+            "fps":30,"quality":"maximum","resolution":720,"cursor":false,"countdown":true,"systemAudio":true,
+            "microphone":"mic-id","camera":"camera-id","corner":"TopLeft","cameraSize":15 })).unwrap();
+        preferences(&path, Some(options.clone())).unwrap();
+        let saved = preferences(&path, None).unwrap().unwrap();
+        assert!(saved.window.is_none());
+        let mut expected = serde_json::to_value(options.clone()).unwrap();
+        expected["window"] = serde_json::Value::Null;
+        assert_eq!(serde_json::to_value(saved).unwrap(), expected);
+        let mut invalid = options;
+        invalid.fps = 500;
+        assert!(preferences(&path, Some(invalid)).is_err());
+        assert_eq!(preferences(&path, None).unwrap().unwrap().fps, 30);
+        std::fs::write(&path, b"broken").unwrap();
+        assert!(preferences(&path, None).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"broken");
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn output_never_upscales_and_h264_dimensions_are_even() {
         assert_eq!(dimensions(1281, 721, 1080).unwrap(), (1280, 720));

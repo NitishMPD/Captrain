@@ -1,1 +1,1 @@
-{"local":{"identifier":"local","description":"Local shelf, image viewer and capture selection windows","local":true,"windows":["shelf","overlay","viewer"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}
+{"local":{"identifier":"local","description":"Local shelf, image viewer and capture selection windows","local":true,"windows":["shelf","overlay","viewer","recording-countdown"],"permissions":["core:event:allow-listen","core:event:allow-unlisten"]}}

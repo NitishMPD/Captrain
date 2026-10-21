@@ -154,6 +154,7 @@ export function Shelf(p: Props) {
     { label: 'Select mode', onSelect: () => setSelection(new Set([item.id])) },
     { label: item.kind === 'url' ? linkOpenLabel(item) : item.kind === 'video' ? 'Play video' : 'Open', onSelect: () => p.onOpen(item) },
     ...(item.kind === 'video' ? [] : [{ label: 'Copy', onSelect: () => native.copy(item.id).then(() => setToast('Copied to clipboard')).catch(report) }]),
+    { label: 'Copy path', onSelect: () => native.copyPath(item.id).then(() => setToast('Path copied')).catch(report) },
     { label: 'Show in Explorer', onSelect: () => native.reveal(item.id).catch(report) },
     ...(item.kind === 'url' ? [{ label: 'Rename...', onSelect: () => setDialog({ name: 'rename-link', item }) }] : []),
     { label: 'Save as…', onSelect: () => native.save(item.id).then(ok => ok && setToast('Saved')).catch(report) },
@@ -167,7 +168,10 @@ export function Shelf(p: Props) {
   const folderMenu = (folder: Folder): MenuItem[] => [
     { label: filters.folderId === folder.id ? 'Show all captures' : 'Show this folder', onSelect: () => p.onFilters({ ...filters, folderId: filters.folderId === folder.id ? null : folder.id }) },
     { label: settings?.activeFolder === folder.id ? 'Stop using as default' : 'Use as default folder', onSelect: () => p.onPatch({ activeFolder: settings?.activeFolder === folder.id ? null : folder.id }) },
-    ...(folder.path ? [{ label: 'Open in Explorer', onSelect: () => native.openFolder(folder.id).catch(report) }] : []),
+    ...(folder.path ? [
+      { label: 'Open in Explorer', onSelect: () => native.openFolder(folder.id).catch(report) },
+      { label: 'Copy path', onSelect: () => native.copyPath(folder.id, true).then(() => setToast('Path copied')).catch(report) },
+    ] : []),
     { label: 'Rename…', separatorBefore: true, onSelect: () => setDialog({ name: 'rename', folder }) },
     { label: 'Delete folder…', danger: true, onSelect: () => setDialog({ name: 'delete-folder', folder }) },
   ];

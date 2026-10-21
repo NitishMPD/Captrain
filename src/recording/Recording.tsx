@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../Icon';
 import { native, type RecordingDevices, type RecordingOptions, type RecordingState, type RecordingTargets } from '../native';
 import { errorMessage, useHold } from '../util';
@@ -56,6 +56,40 @@ export function RecordingStatus({ state, onError }: { state: RecordingState; onE
   </div>;
 }
 
+export function restoreRecording(options: RecordingOptions | null, targets: RecordingTargets, display: string | null): RecordingOptions {
+  const saved = options ?? DEFAULT_RECORDING;
+  return { ...saved,
+    display: targets.displays.find(d => d.id === saved.display)?.id
+      ?? targets.displays.find(d => d.id === display)?.id ?? targets.displays[0]?.id ?? '',
+    window: targets.windows[0]?.id ?? null,
+  };
+}
+
+export function RecordingCountdown() {
+  const state = useRecording();
+  const [error, setError] = useState('');
+  const target = new URLSearchParams(location.search).get('target') ?? 'Selected screen';
+  const cancel = () => native.controlRecording('stop').catch(e => setError(errorMessage(e)));
+  useEffect(() => {
+    // Wait for the initial frame before allowing Rust's three-second timer to start.
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => {
+      native.countdownReady().catch(e => setError(errorMessage(e)));
+    }));
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); void cancel(); } };
+    window.addEventListener('keydown', onKey);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('keydown', onKey); };
+  }, []);
+  return <div className="recording-countdown">
+    <div className="recording-countdown-card">
+      <strong>Recording this {target.includes(' - Window:') ? 'window' : 'screen'}</strong>
+      <p className="recording-target">{target}</p>
+      <span className="recording-countdown-number" role="status" aria-live="assertive">{state.status.startsWith('countdown:') ? state.status.split(':')[1] : '3'}</span>
+      {error && <p role="alert">{error}</p>}
+      <button className="btn" onClick={() => { void cancel(); }}>Cancel <kbd>Esc</kbd></button>
+    </div>
+  </div>;
+}
+
 export function RecordingSetup({ display, onBack, onStarted }: { display: string | null; onBack: () => void; onStarted: () => void }) {
   useHold(true);
   const [options, setOptions] = useState<RecordingOptions>({ ...DEFAULT_RECORDING });
@@ -66,13 +100,18 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const saves = useRef<Promise<unknown>>(Promise.resolve());
   const patch = (value: Partial<RecordingOptions>) => setOptions(o => ({ ...o, ...value }));
   useEffect(() => {
     let live = true;
-    native.recordingTargets().then(value => {
+    Promise.all([native.recordingTargets(), native.recordingPreferences()]).then(([value, saved]) => {
       if (!live) return;
       setTargets(value);
-      patch({ display: value.displays.find(d => d.id === display)?.id ?? value.displays[0]?.id ?? '', window: value.windows[0]?.id ?? null });
+      setOptions(restoreRecording(saved, value, display));
+      setMic(saved?.microphone != null);
+      setCamera(saved?.camera != null);
+      setLoaded(true);
     }).catch(e => { if (live) setError(errorMessage(e)); });
     return () => { live = false; };
   }, [display]);
@@ -87,11 +126,18 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
   }, [mic, camera, devices]);
   const microphone = options.microphone ?? devices?.microphones[0]?.id ?? null;
   const webcam = options.camera ?? devices?.cameras[0]?.id ?? null;
-  const valid = options.display && (options.kind !== 'window' || options.window) && (!mic || microphone) && (!camera || webcam);
+  const valid = loaded && options.display && (options.kind !== 'window' || options.window) && (!mic || devices?.microphones.some(d => d.id === microphone)) && (!camera || devices?.cameras.some(d => d.id === webcam));
+  useEffect(() => {
+    if (!loaded || ((mic || camera) && !devices)) return;
+    const saved = { ...options, microphone: mic ? microphone : null, camera: camera ? webcam : null };
+    saves.current = saves.current.catch(() => {}).then(() => native.recordingPreferences(saved));
+    saves.current.catch(e => setError(errorMessage(e)));
+  }, [loaded, options, mic, camera, microphone, webcam, devices]);
   const start = async () => {
     if (!valid || busy) return;
     setBusy(true); setError('');
     try {
+      await saves.current;
       await native.startRecording({ ...options, microphone: mic ? microphone : null, camera: camera ? webcam : null });
       onStarted();
     } catch (e) { setError(errorMessage(e)); setBusy(false); }
@@ -103,8 +149,8 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
         <h1 className="title">Record video</h1>
       </header>
       <main className="body recording-setup">
-        <p className="recording-intro">Screen only by default. Add sound or your camera when you need it.</p>
-        <fieldset disabled={busy}>
+        <p className="recording-intro">Screen only by default. Your recording choices are remembered on this PC.</p>
+        <fieldset disabled={busy || !loaded}>
           <legend>Capture</legend>
           <div className="seg" role="group" aria-label="Recording source">
             {(['screen', 'window', 'region'] as const).map(kind => <button key={kind} aria-pressed={options.kind === kind} onClick={() => patch({ kind })}>{kind[0].toUpperCase() + kind.slice(1)}</button>)}
@@ -118,19 +164,24 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
                 {!targets.displays.length && <option value="">Loading displays…</option>}
                 {targets.displays.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select></label>}
+          <p className="recording-hint" role="status">Selected {options.kind === 'window' ? 'window' : 'screen'}: {options.kind === 'window'
+            ? targets.windows.find(w => w.id === options.window)?.name ?? 'No window selected'
+            : targets.displays.find(d => d.id === options.display)?.name ?? 'No display selected'}</p>
           {options.kind === 'region' && <p className="recording-hint">Choose your area after pressing Start.</p>}
         </fieldset>
-        <fieldset disabled={busy}>
+        <fieldset disabled={busy || !loaded}>
           <legend>Sound & camera</legend>
           <label className="recording-check"><input type="checkbox" checked={options.systemAudio} onChange={e => patch({ systemAudio: e.target.checked })} />System sound</label>
           <label className="recording-check"><input type="checkbox" checked={mic} onChange={e => setMic(e.target.checked)} />Microphone</label>
           {mic && <label>Microphone device<select disabled={loadingDevices} value={microphone ?? ''} onChange={e => patch({ microphone: e.target.value })}>
+            {options.microphone && devices && !devices.microphones.some(d => d.id === options.microphone) && <option value={options.microphone}>Previously selected microphone unavailable</option>}
             {!devices?.microphones.length && <option value="">{loadingDevices ? 'Finding microphones…' : 'No microphones available'}</option>}
             {devices?.microphones.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select></label>}
           <label className="recording-check"><input type="checkbox" checked={camera} onChange={e => setCamera(e.target.checked)} />Webcam overlay</label>
           {camera && <>
             <label>Camera device<select disabled={loadingDevices} value={webcam ?? ''} onChange={e => patch({ camera: e.target.value })}>
+              {options.camera && devices && !devices.cameras.some(d => d.id === options.camera) && <option value={options.camera}>Previously selected camera unavailable</option>}
               {!devices?.cameras.length && <option value="">{loadingDevices ? 'Finding cameras…' : 'No cameras available'}</option>}
               {devices?.cameras.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select></label>
@@ -146,7 +197,7 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
             <p className="recording-hint">The square camera inset is included in the saved video.</p>
           </>}
         </fieldset>
-        <fieldset disabled={busy}>
+        <fieldset disabled={busy || !loaded}>
           <legend>Video</legend>
           <div className="recording-columns">
             <label>Quality<select value={options.quality} onChange={e => patch({ quality: e.target.value as RecordingOptions['quality'] })}>

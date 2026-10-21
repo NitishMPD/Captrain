@@ -1009,6 +1009,19 @@ impl Library {
                 .ok_or("This item is not a link.")?,
         )
     }
+    pub fn capture_path(&self, id: &str) -> Result<PathBuf> {
+        let item = self.find(id)?;
+        let path = item
+            .exported_path
+            .as_ref()
+            .filter(|p| p.is_file())
+            .cloned()
+            .unwrap_or_else(|| self.path(item, false));
+        if !path.is_file() {
+            return Err("This file is no longer on disk.".into());
+        }
+        Ok(path)
+    }
     pub fn copy(&self, id: &str) -> Result<()> {
         if self.is_video(id)? {
             return Err("Use Save as to copy a recording to a file.".into());
@@ -1150,6 +1163,31 @@ mod tests {
         fs::write(root.join("index.json"), b"broken").unwrap();
         assert!(Library::open(root.clone()).unwrap().backup_items().is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn capture_paths_prefer_exports_and_fall_back_to_owned_originals() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let exports = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        fs::create_dir(&exports).unwrap();
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library
+            .commit_url("https://example.com/", None, None)
+            .unwrap();
+        let original = library.capture_path(&item.id).unwrap();
+        let exported = library
+            .auto_export(&item.id, &exports)
+            .unwrap()
+            .exported_path
+            .unwrap();
+        assert_eq!(library.capture_path(&item.id).unwrap(), exported);
+        fs::remove_file(exported).unwrap();
+        assert_eq!(library.capture_path(&item.id).unwrap(), original);
+        assert!(library.capture_path("../foreign").is_err());
+        fs::remove_file(original).unwrap();
+        assert!(library.capture_path(&item.id).is_err());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(exports).unwrap();
     }
 
     #[test]
