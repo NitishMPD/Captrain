@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { updates, useUpdates } from './updates';
 import { version } from '../../package.json';
+import { ReleaseNotes } from './ReleaseNotes';
 
 export function AppUpdates() {
   const update = useUpdates();
@@ -30,7 +31,7 @@ export function AppUpdates() {
         <button className="btn" disabled={busy} onClick={() => { void (update.status === 'available' ? updates.download() : update.status === 'downloaded' ? updates.install() : updates.check()); }}>{label}</button>
         {update.available?.notes && <button className="btn" aria-expanded={showNotes} onClick={() => setShowNotes(x => !x)}>Release notes</button>}
       </div>
-      {showNotes && update.available?.notes && <pre className="update-notes">{update.available.notes}</pre>}
+      {showNotes && update.available?.notes && <ReleaseNotes notes={update.available.notes} />}
     </section>
   );
 }

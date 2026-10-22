@@ -25,6 +25,14 @@ const PATHS = {
   minus: 'M5 12h14',
   fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   check: 'm5 12 4.5 4.5L19 7',
+  monitor: 'M3 5h18v11H3V5Zm6 15h6m-3-4v4',
+  window: 'M4 5h16v14H4V5Zm0 4h16',
+  mic: 'M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3Zm-6 8a6 6 0 0 0 12 0m-6 6v3',
+  speaker: 'M4 10h3l5-4v12l-5-4H4v-4Zm12-1a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11',
+  pause: 'M9 6v12M15 6v12',
+  play: 'M8 5v14l11-7L8 5Z',
+  stop: 'M7 7h10v10H7V7Z',
+  grip: 'M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;

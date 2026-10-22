@@ -410,7 +410,7 @@ pub fn run() {
                         }
                         Some("screen") => capture::start(app, Kind::Screen),
                         Some("url") => links::start(app),
-                        Some("video") => recording::open_setup(app),
+                        Some("video") => recording::open_setup(app, true),
                         _ => Ok(()),
                     };
                     if let Err(e) = result {
@@ -447,6 +447,12 @@ pub fn run() {
             recording::start_recording,
             recording::recording_control,
             recording::play_recording,
+            recording::island_layout,
+            recording::island_move,
+            recording::island_drag,
+            recording::close_island,
+            recording::open_recording,
+            recording::island_window,
             links::save_link,
             links::open_link,
             links::rename_link,

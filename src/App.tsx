@@ -206,7 +206,7 @@ export function App() {
         {view === 'shelf' && (
           <Shelf recordingActive={recordingActive} items={list.items} total={list.total} thumbs={list.thumbs} loaded={list.loaded} error={list.error} freshId={freshId}
             rev={rev} settings={settings} filters={filters} onFilters={changeFilters} onMore={() => setLimit(l => l + PAGE)}
-            onOpen={openViewer} onRecord={() => setView('recording')} onSettings={() => setView('settings')} onPatch={patch} onSettingsSaved={setSettings}
+            onOpen={openViewer} onRecord={() => native.openRecording().catch(e => setNotice(errorMessage(e)))} onSettings={() => setView('settings')} onPatch={patch} onSettingsSaved={setSettings}
             onChanged={bump} onError={setNotice} />
         )}
         {view === 'recording' && <RecordingSetup display={settings?.display ?? null} onBack={() => setView('shelf')} onStarted={() => setView('shelf')} />}

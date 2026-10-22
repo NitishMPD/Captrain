@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../native', () => ({ native: {} }));
 import { DEFAULT_RECORDING, RecordingSetup, RecordingStatus, recordingTime, restoreRecording, RecordingCountdown } from './Recording';
+import { IslandActive, RecordingIsland } from './Island';
 
 describe('recording controls', () => {
   it('starts with all devices off and requires an explicit start', () => {
@@ -42,5 +43,26 @@ describe('recording controls', () => {
     expect(html).toContain('Camera off');
     expect(html).toContain('Stop');
     expect(recordingTime(3_600_000)).toBe('60:00');
+  });
+  it('island offers record, move and close before starting, then the right controls per state', () => {
+    const ready = renderToStaticMarkup(<RecordingIsland />);
+    expect(ready).toContain('Record');
+    expect(ready).toContain('Move controls');
+    expect(ready).toContain('Close recording controls');
+    const view = (status: string) => renderToStaticMarkup(<IslandActive pending={false} onAction={() => {}}
+      state={{ status, elapsedMs: 65000, frames: 0, error: null, options: { ...DEFAULT_RECORDING, microphone: 'mic' } }} />);
+    const live = view('recording');
+    expect(live).toContain('01:05');
+    expect(live).toContain('Pause recording');
+    expect(live).toContain('Stop recording');
+    expect(live).toContain('Microphone on');
+    expect(live).not.toContain('System sound on');
+    expect(view('paused')).toContain('Resume recording');
+    const countdown = view('countdown:2');
+    expect(countdown).toContain('Starting in 2');
+    expect(countdown).toContain('Cancel recording');
+    expect(countdown).not.toContain('Pause');
+    expect(view('finishing')).toContain('Saving…');
+    expect(view('finishing')).not.toContain('Stop');
   });
 });

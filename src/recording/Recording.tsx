@@ -213,7 +213,7 @@ export function RecordingSetup({ display, onBack, onStarted }: { display: string
           <label className="recording-check"><input type="checkbox" checked={options.cursor} onChange={e => patch({ cursor: e.target.checked })} />Show cursor</label>
           <label className="recording-check"><input type="checkbox" checked={options.countdown} onChange={e => patch({ countdown: e.target.checked })} />3-second countdown</label>
         </fieldset>
-        <p className="recording-hint">Open the shelf to pause or stop. Captrain’s controls stay out of the recording.</p>
+        <p className="recording-hint">Pause or stop from the controls at the top of the screen. Captrain’s controls stay out of the recording.</p>
         {error && <p className="field-error" role="alert">{error}</p>}
       </main>
     </div>

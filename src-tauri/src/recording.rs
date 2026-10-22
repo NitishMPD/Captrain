@@ -80,13 +80,25 @@ fn preferences(path: &std::path::Path, options: Option<Options>) -> Result<Optio
     }
 }
 
+const ISLAND: &str = "recording-island";
+fn island_only(window: &WebviewWindow) -> Result<()> {
+    if window.label() == ISLAND {
+        Ok(())
+    } else {
+        Err("No recording controls are open.".into())
+    }
+}
+fn recording_surface(window: &WebviewWindow) -> Result<()> {
+    island_only(window).or_else(|_| crate::shelf_only(window))
+}
+
 #[tauri::command]
 pub fn recording_preferences(
     window: WebviewWindow,
     state: tauri::State<Arc<AppState>>,
     options: Option<Options>,
 ) -> Result<Option<Options>> {
-    crate::shelf_only(&window)?;
+    recording_surface(&window)?;
     let library = state.library.lock().unwrap();
     preferences(&library.root.join("recording-settings.json"), options)
 }
@@ -198,6 +210,9 @@ pub struct View {
 pub struct Session {
     pub view: View,
     control: Option<mpsc::SyncSender<String>>,
+    // Display the island is snapped to, and the logical size its content needs.
+    island_display: Option<String>,
+    island_size: (f64, f64),
 }
 impl Default for Session {
     fn default() -> Self {
@@ -207,10 +222,12 @@ impl Default for Session {
                 ..Default::default()
             },
             control: None,
+            island_display: None,
+            island_size: (240.0, 44.0),
         }
     }
 }
-pub fn open_setup(app: &AppHandle) -> Result<()> {
+pub fn open_setup(app: &AppHandle, toggle: bool) -> Result<()> {
     let state = app.state::<Arc<AppState>>();
     let active = state.video.lock().unwrap().view.status != "idle";
     if state.busy.load(Ordering::Acquire) && !active {
@@ -224,14 +241,264 @@ pub fn open_setup(app: &AppHandle) -> Result<()> {
         }
         return Ok(());
     }
-    shelf_window::action(app, "open")?;
-    app.emit_to("shelf", "open-recording", ()).map_err(err)?;
+    if let Some(island) = app.get_webview_window(ISLAND) {
+        return if toggle {
+            dismiss_island(app);
+            Ok(())
+        } else {
+            island.set_focus().map_err(err)
+        };
+    }
+    let saved = {
+        let library = state.library.lock().unwrap();
+        preferences(&library.root.join("recording-settings.json"), None)
+    };
+    // Unreadable preferences fall back to defaults; the island reports the error itself.
+    state.video.lock().unwrap().island_display = saved.ok().flatten().map(|o| o.display);
+    shelf_window::action(app, "collapse")?;
+    show_island(app, true);
     Ok(())
+}
+/// Creates the capture-excluded controls window; it stays hidden until its first layout.
+fn show_island(app: &AppHandle, report: bool) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if app2.get_webview_window(ISLAND).is_some() {
+            return;
+        }
+        let result = WebviewWindowBuilder::new(
+            &app2,
+            ISLAND,
+            WebviewUrl::App("index.html?island=1".into()),
+        )
+        .title("Captrain recording controls")
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .visible(false)
+        .focused(false)
+        .build()
+        .map_err(err)
+        .and_then(|w| w.set_content_protected(true).map_err(err));
+        if let (Err(e), true) = (result, report) {
+            let state = app2.state::<Arc<AppState>>();
+            let mut shelf = state.shelf.lock().unwrap();
+            shelf.begin();
+            shelf.finish(false, Some(e), Instant::now(), false);
+            drop(shelf);
+            shelf_window::apply(&app2, false);
+        }
+    });
+}
+/// Lets the island slide up off the screen before its window goes away.
+fn dismiss_island(app: &AppHandle) {
+    if app.get_webview_window(ISLAND).is_none() {
+        return;
+    }
+    let _ = app.emit_to(ISLAND, "island-leave", ());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(260));
+        if let Some(window) = app.get_webview_window(ISLAND) {
+            let _ = window.destroy();
+        }
+    });
+}
+fn island_display(id: Option<&str>) -> Result<shelf_window::DisplayInfo> {
+    if let Some(display) =
+        id.and_then(|id| shelf_window::displays().ok()?.into_iter().find(|d| d.id == id))
+    {
+        return Ok(display);
+    }
+    shelf_window::pointer_display()
+}
+/// Snaps the island to the top centre of a display, sized to its content.
+fn place_island(
+    window: &WebviewWindow,
+    display: &shelf_window::DisplayInfo,
+    (width, height): (f64, f64),
+) -> Result<()> {
+    let (w, h) = (
+        (width * display.scale).ceil() as i32,
+        (height * display.scale).ceil() as i32,
+    );
+    let b = display.bounds;
+    let x = b.left + (b.right - b.left - w) / 2;
+    // Move first so a DPI change on the new display settles before sizing.
+    window
+        .set_position(PhysicalPosition::new(x, b.top))
+        .map_err(err)?;
+    window
+        .set_size(PhysicalSize::new(w as u32, h as u32))
+        .map_err(err)?;
+    // Undecorated windows can keep an invisible frame; put the content itself on the screen edge.
+    let (inner, outer) = (
+        window.inner_position().map_err(err)?,
+        window.outer_position().map_err(err)?,
+    );
+    window
+        .set_position(PhysicalPosition::new(
+            x - (inner.x - outer.x),
+            b.top - (inner.y - outer.y),
+        ))
+        .map_err(err)
+}
+fn step_display(current: usize, step: i32, count: usize) -> usize {
+    (current as i64 + step.signum() as i64).rem_euclid(count.max(1) as i64) as usize
+}
+#[tauri::command]
+pub fn island_layout(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    width: f64,
+    height: f64,
+) -> Result<String> {
+    island_only(&window)?;
+    if !(24.0..=720.0).contains(&width) || !(16.0..=240.0).contains(&height) {
+        return Err("Invalid recording controls size.".into());
+    }
+    let id = {
+        let mut session = state.video.lock().unwrap();
+        session.island_size = (width, height);
+        session.island_display.clone()
+    };
+    let display = island_display(id.as_deref())?;
+    state.video.lock().unwrap().island_display = Some(display.id.clone());
+    place_island(&window, &display, (width, height))?;
+    if !window.is_visible().map_err(err)? {
+        window.show().map_err(err)?;
+        if state.video.lock().unwrap().view.status == "idle" {
+            window.set_focus().map_err(err)?;
+        }
+    }
+    Ok(display.id)
+}
+#[tauri::command]
+pub fn island_move(
+    window: WebviewWindow,
+    state: tauri::State<Arc<AppState>>,
+    step: i32,
+) -> Result<String> {
+    island_only(&window)?;
+    let mut all = shelf_window::displays()?;
+    if all.is_empty() {
+        return Err("No display is available.".into());
+    }
+    all.sort_by_key(|d| (d.bounds.left, d.bounds.top));
+    let (current, size) = {
+        let session = state.video.lock().unwrap();
+        let current = all
+            .iter()
+            .position(|d| session.island_display.as_ref() == Some(&d.id))
+            .unwrap_or(0);
+        (current, session.island_size)
+    };
+    let index = step_display(current, step, all.len());
+    let display = all.swap_remove(index);
+    state.video.lock().unwrap().island_display = Some(display.id.clone());
+    place_island(&window, &display, size)?;
+    Ok(display.id)
+}
+#[tauri::command]
+pub async fn island_drag(window: WebviewWindow, app: AppHandle) -> Result<String> {
+    island_only(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        use windows::Win32::{
+            Foundation::POINT,
+            Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONEAREST},
+            UI::{
+                Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
+                WindowsAndMessaging::GetCursorPos,
+            },
+        };
+        let cursor = || -> Result<POINT> {
+            let mut point = POINT::default();
+            unsafe { GetCursorPos(&mut point) }.map_err(err)?;
+            Ok(point)
+        };
+        let state = app.state::<Arc<AppState>>();
+        let start = cursor()?;
+        let origin = window.outer_position().map_err(err)?;
+        let threshold = 5.0 * window.scale_factor().map_err(err)?;
+        let mut moved = false;
+        while unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
+            let point = cursor()?;
+            if moved
+                || ((point.x - start.x) as f64).hypot((point.y - start.y) as f64) >= threshold
+            {
+                moved = true;
+                window
+                    .set_position(PhysicalPosition::new(
+                        origin.x + point.x - start.x,
+                        origin.y + point.y - start.y,
+                    ))
+                    .map_err(err)?;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        if moved {
+            let monitor = unsafe { MonitorFromPoint(cursor()?, MONITOR_DEFAULTTONEAREST) };
+            if let Some(display) = shelf_window::displays()?
+                .into_iter()
+                .find(|d| d.monitor.as_raw_hmonitor() == monitor.0)
+            {
+                state.video.lock().unwrap().island_display = Some(display.id);
+            }
+        }
+        let (id, size) = {
+            let session = state.video.lock().unwrap();
+            (session.island_display.clone(), session.island_size)
+        };
+        let display = island_display(id.as_deref())?;
+        place_island(&window, &display, size)?;
+        Ok(display.id)
+    })
+    .await
+    .map_err(err)?
+}
+#[tauri::command]
+pub fn close_island(
+    window: WebviewWindow,
+    app: AppHandle,
+    state: tauri::State<Arc<AppState>>,
+    setup: bool,
+) -> Result<()> {
+    island_only(&window)?;
+    if state.video.lock().unwrap().view.status != "idle" {
+        return Err("Stop the recording first.".into());
+    }
+    dismiss_island(&app);
+    if setup {
+        shelf_window::action(&app, "open")?;
+        app.emit_to("shelf", "open-recording", ()).map_err(err)?;
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn open_recording(window: WebviewWindow, app: AppHandle) -> Result<()> {
+    crate::shelf_only(&window)?;
+    open_setup(&app, false)
+}
+/// Names the window Window mode records: the last external window, remembered before the island took focus.
+#[tauri::command]
+pub fn island_window(window: WebviewWindow) -> Result<Option<String>> {
+    island_only(&window)?;
+    let id = crate::foreground::target();
+    if id == 0 || capture::eligible(HWND(id as *mut _)).is_err() {
+        return Ok(None);
+    }
+    Ok(windows_capture::window::Window::from_raw_hwnd(id as *mut _)
+        .title()
+        .ok())
 }
 fn publish(app: &AppHandle, state: &AppState, view: View) {
     state.video.lock().unwrap().view = view.clone();
     let _ = app.emit_to("shelf", "recording-state", &view);
     let _ = app.emit_to("recording-countdown", "recording-state", &view);
+    let _ = app.emit_to(ISLAND, "recording-state", &view);
 }
 fn helper(app: &AppHandle) -> Result<Command> {
     let path = if cfg!(debug_assertions) {
@@ -272,7 +539,7 @@ pub struct Targets {
 }
 #[tauri::command]
 pub fn recording_targets(window: WebviewWindow) -> Result<Targets> {
-    crate::shelf_only(&window)?;
+    recording_surface(&window)?;
     let displays = shelf_window::displays()?
         .into_iter()
         .enumerate()
@@ -301,7 +568,7 @@ pub fn recording_targets(window: WebviewWindow) -> Result<Targets> {
 }
 #[tauri::command]
 pub async fn recording_devices(window: WebviewWindow, app: AppHandle) -> Result<serde_json::Value> {
-    crate::shelf_only(&window)?;
+    recording_surface(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut child = helper(&app)?.spawn().map_err(err)?;
         writeln!(child.stdin.take().unwrap(), "{{\"operation\":\"devices\"}}").map_err(err)?;
@@ -330,7 +597,7 @@ pub async fn recording_devices(window: WebviewWindow, app: AppHandle) -> Result<
 #[tauri::command]
 pub fn recording_state(window: WebviewWindow, state: tauri::State<Arc<AppState>>) -> Result<View> {
     if window.label() != "recording-countdown" {
-        crate::shelf_only(&window)?;
+        recording_surface(&window)?;
     }
     Ok(state.video.lock().unwrap().view.clone())
 }
@@ -345,7 +612,7 @@ pub fn recording_control(
             return Err("Only cancel is available during countdown.".into());
         }
     } else {
-        crate::shelf_only(&window)?;
+        recording_surface(&window)?;
     }
     if !["stop", "pause", "resume"].contains(&action.as_str()) {
         return Err("Unknown recording action.".into());
@@ -360,7 +627,7 @@ pub fn recording_control(
 }
 #[tauri::command]
 pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) -> Result<()> {
-    crate::shelf_only(&window)?;
+    recording_surface(&window)?;
     options.validate()?;
     helper(&app)?;
     let state = app.state::<Arc<AppState>>().inner().clone();
@@ -369,12 +636,14 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
         .find(|d| d.id == options.display)
         .ok_or("Choose an available display.")?;
     let target = if options.kind == Kind::Window {
-        let id: isize = options
-            .window
-            .as_deref()
-            .ok_or("Choose a window.")?
-            .parse()
-            .map_err(err)?;
+        let id: isize = match options.window.as_deref() {
+            Some(id) => id.parse().map_err(err)?,
+            // The island records the window used last, remembered before Captrain took focus.
+            None => crate::foreground::target(),
+        };
+        if id == 0 {
+            return Err("Switch to the window you want to record, then press Record.".into());
+        }
         capture::eligible(HWND(id as *mut _))?;
         Some(id)
     } else {
@@ -403,6 +672,10 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
     );
     state.shelf.lock().unwrap().begin();
     state.timer.notify_one();
+    if app.get_webview_window(ISLAND).is_none() {
+        state.video.lock().unwrap().island_display = Some(display.id.clone());
+        show_island(&app, false);
+    }
     std::thread::spawn(move || {
         let mut path = PathBuf::new();
         let result: Result<Option<crate::library::Item>> = (|| {
@@ -593,6 +866,10 @@ pub fn start_recording(window: WebviewWindow, app: AppHandle, options: Options) 
                 ..Default::default()
             },
         );
+        // A cancelled or failed start keeps the island ready for another try.
+        if committed {
+            dismiss_island(&app);
+        }
         let shortcuts_only = state.settings.lock().unwrap().value.shortcuts_only;
         state
             .shelf
@@ -756,6 +1033,13 @@ mod tests {
         assert!(dimensions(1, 100, 0).is_err());
         assert!(dimensions(2, 4000, 720).is_err());
         assert!(bitrate(1920, 1080, 60, "maximum") > bitrate(1920, 1080, 60, "high"));
+    }
+    #[test]
+    fn island_display_steps_wrap_across_monitors() {
+        assert_eq!(step_display(0, 1, 3), 1);
+        assert_eq!(step_display(2, 1, 3), 0);
+        assert_eq!(step_display(0, -1, 3), 2);
+        assert_eq!(step_display(0, 5, 1), 0);
     }
     #[test]
     fn options_reject_non_capture_targets_and_unbounded_values() {
