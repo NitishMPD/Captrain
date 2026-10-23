@@ -126,7 +126,7 @@ export function App() {
   }, [settings]);
 
   const error = notice ?? shelf.error;
-  const dismiss = () => { setNotice(null); if (shelf.error) quiet(native.shelf('clearError')); };
+  const dismiss = () => { setNotice(null); if (shelf.error) native.shelf('clearError').catch(e => setNotice(errorMessage(e))); };
   const openViewer = (item: CaptureItem) =>
     (item.kind === 'url' ? native.openLink(item.id) : item.kind === 'video' ? native.playRecording(item.id) : native.openViewer(item.id, filters.query, filters.folderId, filters.tab === 'exports' && filters.folderId === null)).catch(e => setNotice(errorMessage(e)));
 

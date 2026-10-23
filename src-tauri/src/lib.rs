@@ -60,6 +60,16 @@ fn shelf_action(
     reveal: Option<u64>,
 ) -> Result<()> {
     shelf_only(&window)?;
+    if action == "clearError" {
+        let state = app.state::<Arc<AppState>>();
+        let error = state.shelf.lock().unwrap().view.error.clone();
+        if error
+            .as_deref()
+            .is_some_and(|e| e.contains(library::MISSING_FILES_WARNING))
+        {
+            state.library.lock().unwrap().dismiss_missing_files_warning()?;
+        }
+    }
     shelf_window::action_for(&app, &action, reveal)
 }
 #[tauri::command]

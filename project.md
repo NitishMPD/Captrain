@@ -13,6 +13,8 @@ The installer build first builds the helper and bundles its pinned recorder depe
 
 ## Native invariants
 
+Dismissing the missing-capture-files warning persists locally across app restarts. Missing-file metadata remains preserved and unavailable captures stay hidden; other startup warnings are still reported.
+
 Rust owns the shelf state machine and its single replaceable dismissal deadline, native placement/focus, capture transaction, shortcuts and serialized persistence. This consolidates dismissal with native focus and capture events rather than duplicating timers in React. Pure Rust state tests cover the same deterministic transition contract proposed for src/shelf/state.ts in PLAN.md. Temporary reveal uses show-without-activation and arms dismissal after frontend ready; manual open explicitly activates. Hover and holds pause dismissal; stale deadlines cannot close newer/manual state. Native deactivation collapses manual mode. Capture cancellation restores prior mode; capture completion never promotes temporary to manual. Tight native window bounds leave no large invisible click-catching surface.
 
 One native transaction freezes a clean display after hiding app surfaces and synchronizing the compositor. Region selection uses physical pixels over the frozen display. Window selection uses eligible window rectangles and Windows Graphics Capture of the selected native window, never a desktop crop. PNGs and thumbnails commit before the atomic index replacement and notification. All file commands accept owned capture IDs. The frontend receives data URLs only for the visible page/preview. Export uses a native Save dialog and preserves the original.

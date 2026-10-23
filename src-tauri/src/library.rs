@@ -14,6 +14,7 @@ use windows::{
 };
 
 pub type Result<T> = std::result::Result<T, String>;
+pub const MISSING_FILES_WARNING: &str = "Some capture files are missing. Their metadata is preserved; only available captures are shown.";
 fn valid_link_title(value: &str) -> Result<String> {
     let title = value.trim();
     if title.is_empty() || title.chars().count() > 120 || value.chars().any(char::is_control) {
@@ -663,17 +664,19 @@ impl Library {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Index::default(),
             Err(e) => return Err(err(e)),
         };
-        if index.items.iter().any(|i| {
-            !root
-                .join(if i.kind == Kind::Video {
-                    "recordings"
-                } else {
-                    "captures"
-                })
-                .join(format!("{}.{}", i.id, i.kind.extension()))
-                .is_file()
-        }) {
-            warning = Some("Some capture files are missing. Their metadata is preserved; only available captures are shown.".into());
+        if !root.join("missing-files-warning-dismissed").is_file()
+            && index.items.iter().any(|i| {
+                !root
+                    .join(if i.kind == Kind::Video {
+                        "recordings"
+                    } else {
+                        "captures"
+                    })
+                    .join(format!("{}.{}", i.id, i.kind.extension()))
+                    .is_file()
+            })
+        {
+            warning = Some(MISSING_FILES_WARNING.into());
         }
         let pending = fs::read_dir(root.join("recordings"))
             .map_err(err)?
@@ -696,6 +699,12 @@ impl Library {
             warning,
             writable,
         })
+    }
+    pub fn dismiss_missing_files_warning(&self) -> Result<()> {
+        atomic_write(
+            &self.root.join("missing-files-warning-dismissed"),
+            b"dismissed",
+        )
     }
     pub fn list(&self, query: &str, offset: usize, limit: usize) -> Page {
         self.list_filtered(query, offset, limit, None, false)
@@ -1091,6 +1100,35 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_files_warning_stays_dismissed_without_hiding_other_warnings() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let mut library = Library::open(root.clone()).unwrap();
+        let item = library
+            .commit_url("https://example.com/", None, None)
+            .unwrap();
+        fs::remove_file(library.path(&item, false)).unwrap();
+        let index = fs::read(root.join("index.json")).unwrap();
+        let library = Library::open(root.clone()).unwrap();
+        assert_eq!(library.warning.as_deref(), Some(MISSING_FILES_WARNING));
+        library.dismiss_missing_files_warning().unwrap();
+        let reopened = Library::open(root.clone()).unwrap();
+        assert!(reopened.warning.is_none());
+        assert_eq!(reopened.items.len(), 1);
+        assert_eq!(reopened.list("", 0, 20).total, 0);
+        assert_eq!(fs::read(root.join("index.json")).unwrap(), index);
+        fs::write(root.join("recordings").join("orphan.mp4"), b"partial").unwrap();
+        let warning = Library::open(root.clone()).unwrap().warning.unwrap();
+        assert!(warning.contains("unindexed recordings"));
+        assert!(!warning.contains(MISSING_FILES_WARNING));
+        fs::write(root.join("index.json"), b"damaged").unwrap();
+        assert!(Library::open(root.clone())
+            .unwrap()
+            .warning
+            .unwrap()
+            .contains("index is damaged"));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn cloud_backup_excludes_pc_paths_and_restore_is_additive_and_transactional() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());

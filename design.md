@@ -3,6 +3,8 @@ Author: Nitish
 
 ## User experience
 
+Closing the missing-capture-files banner permanently dismisses that warning on this PC, including after restarting the app. Other error messages remain visible normally.
+
 Settings release notes display formatted headings, lists, emphasis, code and underlined links in the existing typography and theme. Keep the 180px scroll limit, wrap long URLs and allow keyboard focus on the scrollable region.
 
 Item context menus offer Select mode. Entering selects that item; subsequent row clicks toggle selection instead of opening it, in list and grid views. A compact action bar shows the selected count, Select visible, Move, Save unsaved, confirmed Delete and Done. Selection is limited to loaded items and clears on filter changes or leaving the shelf; Show more extends the selectable items. Escape exits selection first. Batch Move reuses folder behavior, including exporting to permanent PC folders. Batch Save chooses one PC directory and skips items already marked exported, with exclusive filenames. Delete removes library originals only after one confirmation and preserves exported copies. Batch operations report partial failures, retain unfinished selections and prevent duplicate submissions.
